@@ -2,8 +2,8 @@ import torch
 import numpy as np
 
 # Assuming your folders have __init__.py files
-from diff_nmpc.dynamics.pendulum import PendulumDynamics
-from diff_nmpc.utils.plotting import plot_pendulum_trajectories
+from diffsqp.dynamics.pendulum import PendulumDynamics
+from diffsqp.utils.plotting import plot_pendulum_trajectories
 
 
 def run_simulation():
