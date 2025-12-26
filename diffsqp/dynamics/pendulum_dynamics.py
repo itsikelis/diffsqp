@@ -1,10 +1,13 @@
 import torch
 
-from .base_dynamics import Dynamics
+from diffsqp.dynamics import Dynamics
 
 
 class PendulumDynamics(Dynamics):
     def __init__(self, m: float, l: float, b: float, grav: float = 9.81):
+        self.nq = 1
+        self.nv = 1
+        self.nu = 1
         self.m = m
         self.l = l
         self.b = b
@@ -14,7 +17,9 @@ class PendulumDynamics(Dynamics):
         self.inertia_inv = 1.0 / (self.m * self.l**2)
 
     def f(self, x, u):
-        # x[:, 0] = theta, x[:, 1] = theta_dot
+        # x_dot:
+        # [ theta_dot  ]
+        # [ theta_ddot ]
         theta = x[:, 0:1]
         dtheta = x[:, 1:2]
 
@@ -27,10 +32,10 @@ class PendulumDynamics(Dynamics):
         return torch.cat([dtheta, ddtheta], dim=1)
 
     def fx(self, x, u):
-        batch_size = x.shape[0]
-        # df/dx matrix
-        # [ 0,                     1 ]
+        # df/dx matrix:
+        # [ 0.0,               1.0     ]
         # [ -g/l * cos(theta), -b/ml^2 ]
+        batch_size = x.shape[0]
 
         # Initialize Jacobian tensor (Batch, State, State)
         A = torch.zeros((batch_size, 2, 2), device=x.device)
@@ -41,7 +46,9 @@ class PendulumDynamics(Dynamics):
 
     def fu(self, x, u):
         batch_size = x.shape[0]
-        # df/du matrix: [0, 1/ml^2]^T
+        # df/du matrix:
+        # [ 0.0    ]
+        # [ 1/ml^2 ]
 
         B = torch.zeros((batch_size, 2, 1), device=x.device)
         B[:, 1, 0] = self.inertia_inv
