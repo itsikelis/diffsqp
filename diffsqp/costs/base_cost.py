@@ -12,39 +12,46 @@ class Cost(ABC):
         """
         Cost
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def lx(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """
         Cost gradient w.r.t x
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def lu(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """
         Cost gradient w.r.t u
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def lxx(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """
         Cost Hessian w.r.t xx
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def luu(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """
         Cost Hessian w.r.t uu
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def lux(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """
+        Cost Hessian w.r.t ux
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def lxu(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        """
         Cost Hessian w.r.t xu
         """
-        pass
+        raise NotImplementedError
