@@ -1,5 +1,4 @@
 import torch
-import pytest
 from diffsqp.costs import Cost, LqrCost
 
 

@@ -8,35 +8,44 @@ class Dynamics(ABC):
     Expects states 'x' of shape (N, state_dim) and controls 'u' of shape (N, control_dim).
     """
 
-    @abstractmethod
-    def f(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+    def f(self, x: torch.Tensor, u: torch.Tensor, dt: float) -> torch.Tensor:
         """
-        Continuous-time dynamics: x_dot = f(x, u)
+        Discrete-time dynamics: x_k+1 = f(x_k, u_k)
         """
-        pass
+        x_dot = self.fc(x, u)
+        return x + dt * self.fc(x, u)
 
-    def step(self, x: torch.Tensor, u: torch.Tensor, dt: float) -> torch.Tensor:
-        """
-        Discrete-time step using RK4 Integration.
-        x_next = x + (dt/6) * (k1 + 2k2 + 2k3 + k4)
-        """
-        k1 = self.f(x, u)
-        k2 = self.f(x + 0.5 * dt * k1, u)
-        k3 = self.f(x + 0.5 * dt * k2, u)
-        k4 = self.f(x + dt * k3, u)
-
-        return x + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
-
-    @abstractmethod
-    def fx(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+    def fx(self, x: torch.Tensor, u: torch.Tensor, dt: float) -> torch.Tensor:
         """
         State Jacobian: df/dx
         """
-        pass
+        n_state = x.shape[1]
+        return torch.add(dt * self.fcx(x, u), torch.eye(n_state))
 
-    @abstractmethod
-    def fu(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+    def fu(self, x: torch.Tensor, u: torch.Tensor, dt: float) -> torch.Tensor:
         """
         Control Jacobian: df/du
         """
-        pass
+        n_state = x.shape[1]
+        return dt * self.fcu(x, u)
+
+    @abstractmethod
+    def fc(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        """
+        Continuous time dynamics: x_dot = fc(x_k, u_k)
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def fcx(self, x, u) -> torch.Tensor:
+        """
+        Derivative of continuous time dynamics w.r.t x
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def fcu(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        """
+        Derivative of continuous time dynamics w.r.t u
+        """
+        raise NotImplementedError

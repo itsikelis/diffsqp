@@ -16,10 +16,10 @@ class PendulumDynamics(Dynamics):
         # Pre-calculate constant factor
         self.inertia_inv = 1.0 / (self.m * self.l**2)
 
-    def f(self, x, u):
-        # x_dot:
-        # [ theta_dot  ]
-        # [ theta_ddot ]
+    def fc(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        """
+        Continuous time dynamics: x_dot = fc(x_k, u_k)
+        """
         theta = x[:, 0:1]
         dtheta = x[:, 1:2]
 
@@ -31,10 +31,12 @@ class PendulumDynamics(Dynamics):
 
         return torch.cat([dtheta, ddtheta], dim=1)
 
-    def fx(self, x, u):
-        # df/dx matrix:
-        # [ 0.0,               1.0     ]
-        # [ -g/l * cos(theta), -b/ml^2 ]
+    def fcx(self, x, u) -> torch.Tensor:
+        """
+        dfc/dx matrix:
+        [ 0.0,               1.0     ]
+        [ -g/l * cos(theta), -b/ml^2 ]
+        """
         batch_size = x.shape[0]
 
         # Initialize Jacobian tensor (Batch, State, State)
@@ -44,12 +46,13 @@ class PendulumDynamics(Dynamics):
         A[:, 1, 1] = -self.b * self.inertia_inv
         return A
 
-    def fu(self, x, u):
+    def fcu(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        """
+        dfc/du matrix:
+        [ 0.0    ]
+        [ 1/ml^2 ]
+        """
         batch_size = x.shape[0]
-        # df/du matrix:
-        # [ 0.0    ]
-        # [ 1/ml^2 ]
-
         B = torch.zeros((batch_size, 2, 1), device=x.device)
         B[:, 1, 0] = self.inertia_inv
         return B

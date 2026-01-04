@@ -25,8 +25,7 @@ def run_simulation():
 
     # 4. Simulation Loop
     for i in range(steps):
-        # We use the RK4 method inherited from BaseDynamics
-        x = model.step(x, u, dt)
+        x = model.f(x, u, dt)
 
         state_history.append(x)
         time_history.append((i + 1) * dt)
