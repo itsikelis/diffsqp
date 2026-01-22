@@ -3,6 +3,7 @@ import torch
 from diffsqp.problems import Problem
 from diffsqp.costs import LqrCost
 from diffsqp.dynamics import PendulumDynamics
+from diffsqp.solvers import AdmmSolver
 from diffsqp.solvers import LqrSolver
 
 horizon = 10
@@ -29,13 +30,22 @@ for i in range(horizon - 1):
 prob.costs.append(final_cost)
 
 # Set initial guess
-prob.variables = torch.zeros((n_batch, n_state * horizon + (horizon - 1) * n_ctrl))
+prob.variables = torch.ones((n_batch, n_state * horizon + (horizon - 1) * n_ctrl))
 
 # Create solver object
-solver = LqrSolver(prob)
+# solver = LqrSolver(prob)
+# solver.solve()
 
-solver.solve()
+solver = AdmmSolver(prob)
+solver.step()
 
+# print(solver.V[0])
+# print(solver.u[0])
+# print(solver.h)
+# print(solver.delta_x[-1])
+# print(solver.delta_u[-1])
+# print(solver.lagrange_mult[-1])
+#
 # print(prob.state(2))
 # prob.set_state(2, torch.ones((n_batch, n_state)))
 # print(prob.state(2))
