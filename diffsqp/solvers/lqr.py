@@ -4,7 +4,7 @@ from torch import bmm
 from diffsqp.problems import Problem
 
 
-class LqrSolver:
+class Lqr:
     def __init__(self, prob: Problem) -> None:
         self.prob = prob
         self.horizon = self.prob.horizon
