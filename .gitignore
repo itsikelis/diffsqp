@@ -8,3 +8,10 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Saved plots and videos
+*.jpeg
+*.jpg
+*.png
+*.pdf
+*.mp4

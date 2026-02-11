@@ -15,6 +15,7 @@ class Problem(ABC):
         self.stage_dynamics: list[Dynamics] = []
         self.states: list[torch.Tensor] = []
         self.controls: list[torch.Tensor] = []
+        self.costates: list[torch.Tensor] = []
 
     # def state(self, stage_idx: int) -> torch.Tensor:
     #     # TODO: Add check here to see if index corresponds to horizon length

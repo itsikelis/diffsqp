@@ -1,14 +1,10 @@
 import torch
-from diffsqp.dynamics import Dynamics, PendulumDynamics
+from diffsqp.dynamics import Dynamics, PendulumDynamics, CartPoleDynamics
 
 
 def test_dynamics_derivatives(
     dyn: Dynamics, x: torch.Tensor, u: torch.Tensor, dt: float
 ):
-    m = dyn.m
-    l = dyn.l
-    b = dyn.b
-    dt = 0.01
     n_batch = x.shape[0]
 
     # 1. Get analytical Jacobian
@@ -41,6 +37,7 @@ def test_dynamics_derivatives(
     assert fu_analytic.shape == (n_batch, dyn.nx, dyn.nu)
 
     # 4. Compare derivatives
+    # torch.set_printoptions(2)
     assert torch.allclose(fx_analytic, fx_numeric, atol=1e-6)
     assert torch.allclose(fu_analytic, fu_numeric, atol=1e-6)
 
@@ -48,12 +45,12 @@ def test_dynamics_derivatives(
 
 
 if __name__ == "__main__":
-    n_batch = 2
-    m, l, b = 1.0, 1.0, 0.1
+    n_batch = 1
     dt = 0.01
-    dyn = PendulumDynamics(m, l, b)
+    # dyn = PendulumDynamics(m=1.0, l=1.0, b=0.1)
+    dyn = CartPoleDynamics(mc=1.0, mp=1.0, lp=1.0, grav=9.81)
 
-    x = torch.randn(n_batch, 2, requires_grad=True)
-    u = torch.randn(n_batch, 1, requires_grad=True)
+    x = torch.randn(n_batch, dyn.nx, requires_grad=True)
+    u = torch.randn(n_batch, dyn.nu, requires_grad=True)
 
     test_dynamics_derivatives(dyn, x, u, dt)

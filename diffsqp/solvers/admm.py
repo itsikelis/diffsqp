@@ -17,6 +17,7 @@ class Admm:
         n_ctrl = self.prob.n_ctrl
         self.delta_x = [None] * self.prob.horizon
         self.delta_u = [None] * (self.prob.horizon - 1)
+        self.costates = [None] * self.prob.horizon
 
         self.lqr_solver = Lqr(prob)
 
@@ -26,13 +27,13 @@ class Admm:
 
         # Update self.delta_x, self.delta_u
         self.update_deltas(delta_x_bar, delta_u_bar)
+        self.calc_costates()
 
     def solve(self):
         # Step
         self.step()
-
         # Return corrections
-        return self.delta_x, self.delta_u
+        return self.delta_x, self.delta_u, self.costates
 
     def update_deltas(self, delta_x_bar, delta_u_bar):
         ##############################################
@@ -62,3 +63,6 @@ class Admm:
         # else:
         #     dx_F = self.a * delta_x_bar[-1] + (1 - self.a) * self.delta_x[-1]
         # self.delta_x[-1] = dx_F
+
+    def calc_costates(self):
+        self.costates = self.lqr_solver.delta_lambda

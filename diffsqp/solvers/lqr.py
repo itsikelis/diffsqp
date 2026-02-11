@@ -23,7 +23,7 @@ class Lqr:
         # For the forward pass
         self.delta_x = [None] * self.horizon
         self.delta_u = [None] * (self.horizon - 1)
-        self.lagrange_mult = [None] * (self.horizon - 1)
+        self.delta_lambda = [None] * self.horizon
 
     # def ensure_batch(t): return t.expand(n_batch, -1, -1) if t.dim() == 2 else t
     #
@@ -151,8 +151,12 @@ class Lqr:
 
             term1 = bmm(self.V[k], self.delta_x[k].unsqueeze(2)).squeeze(2)
             term2 = self.u[k]
-            self.lagrange_mult[k] = term1 + term2
+            self.delta_lambda[k] = term1 + term2
 
             assert self.delta_x[k + 1].shape == torch.Size([nB, nx])
             assert self.delta_u[k].shape == torch.Size([nB, nu])
-            assert self.lagrange_mult[k].shape == torch.Size([nB, nx])
+            assert self.delta_lambda[k].shape == torch.Size([nB, nx])
+        # Calculate final Lagrange multiplier
+        term1 = bmm(self.V[-1], self.delta_x[-1].unsqueeze(2)).squeeze(2)
+        term2 = self.u[-1]
+        self.delta_lambda[-1] = term1 + term2

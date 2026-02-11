@@ -47,8 +47,6 @@ prob.costs.append(final_cost)
 solver = Ssqp(prob)
 
 solver.solve()
-print(solver.terminate)
-print(prob.states)
 
 import matplotlib.pyplot as plt
 
