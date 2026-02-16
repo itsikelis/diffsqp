@@ -47,8 +47,8 @@ class Lqr:
                 x_lin, u_lin, x_next, self.prob.stage_dynamics[i]
             )
 
-            (self.V[i], self.v[i], self.K[i], self.k[i]) = self.riccati_backward_(
-                Q=Q, q=q, R=R, r=r, S=S, A=A, B=B, b=b, V=self.V[i + 1], v=self.v[i + 1]
+            (self.K[i], self.k[i], self.V[i], self.v[i]) = self.riccati_backward_(
+                Q=Q, q=q, R=R, r=r, S=S, V=self.V[i + 1], v=self.v[i + 1], A=A, B=B, b=b
             )
 
     def forward_pass_(self):
@@ -70,7 +70,7 @@ class Lqr:
                 Dx0=Dx0, K=K, k=k, A=A, B=B, b=b
             )
 
-    def riccati_backward_(self, Q, q, R, r, S, A, B, b, V, v):
+    def riccati_backward_(self, Q, q, R, r, S, V, v, A, B, b):
         AT = torch.transpose(A, 1, 2)
         BT = torch.transpose(B, 1, 2)
         ST = torch.transpose(S, 1, 2)
@@ -102,7 +102,7 @@ class Lqr:
         assert V_.shape == torch.Size([nB, nx, nx])
         assert v_.shape == torch.Size([nB, nx])
 
-        return V_, v_, K_, k_
+        return K_, k_, V_, v_
 
     def riccati_forward_(self, Dx0, K, k, A, B, b):
         Du = mv(K, Dx0) + k
