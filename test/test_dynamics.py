@@ -52,7 +52,7 @@ if __name__ == "__main__":
     n_batch = 1
     dt = 0.01
     # dyn = PendulumDynamics(m=1.0, l=1.0, b=0.1)
-    # dyn = CartPoleDynamics(mc=1.0, mp=1.0, lp=1.0, grav=9.81)
+    dyn = CartPoleDynamics(mc=1.0, mp=1.0, lp=1.0, grav=9.81)
 
     x = torch.randn(n_batch, dyn.nx, requires_grad=True)
     u = torch.randn(n_batch, dyn.nu, requires_grad=True)

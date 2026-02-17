@@ -10,7 +10,7 @@ dt = 0.001
 tf = 5.0  # Reduced time for faster testing
 steps = int(tf / dt)
 
-model = CartPoleDynamics(mc=1.0, mp=1.0, lp=0.5, grav=9.81)
+model = CartPoleDynamics(mc=0.5, mp=0.3, lp=0.2, grav=9.81)
 
 # 2. Initial State
 x = torch.tensor([[0.0, torch.pi, 0.0, 0.0], [0.0, torch.pi, 0.0, 0.1]])
