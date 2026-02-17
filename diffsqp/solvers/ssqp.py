@@ -19,25 +19,25 @@ class Ssqp:
         self.admm_solver = Admm(prob)
 
         # Log best line search metrics
-        self.best_cost, self.best_gamma = self.calc_metrics(
+        self.best_cost, self.best_gamma, self.best_uact = self.calc_metrics(
             self.prob.states,
             self.prob.controls,
         )
 
         self.terminated = torch.zeros((self.n_batch), dtype=torch.bool)
 
-    def solve(self):
+    def solve(self, max_iter=100):
         iter = 0
         while not torch.all(self.terminated):
-            print("iteration: ", iter)
+            print("################")
+            print("SSQP Iteration: ", iter)
             self.step()
             iter += 1
-            if iter >= 100:
+            if iter >= max_iter:
                 break
 
     def step(self):
-        delta_x, delta_u, costates = self.admm_solver.solve()
-        self.prob.costates = costates
+        delta_x, delta_u, delta_pi, delta_lam = self.admm_solver.solve()
         self.line_search(delta_x, delta_u)
         self.check_termination()
 
@@ -46,6 +46,7 @@ class Ssqp:
         line_search_done = self.terminated.clone()
         i = 0
         while (not torch.all(line_search_done)) and (i < max_iter):
+            # print("Line search iter: ", i)
             i += 1
             gamma = torch.zeros((self.n_batch, 1))
 
@@ -57,11 +58,15 @@ class Ssqp:
                 delta_x,
                 delta_u,
             )
-            cost, gamma = self.calc_metrics(x_cand, u_cand)
+            cost, gamma, uact = self.calc_metrics(x_cand, u_cand)
 
             # Update successful batches
             cost_improved = cost < self.best_cost
             gamma_improved = gamma < self.best_gamma
+            uact_improved = uact < self.best_uact
+            # update_mask = (
+            #     cost_improved | gamma_improved | uact_improved
+            # ) & ~line_search_done
             update_mask = (cost_improved | gamma_improved) & ~line_search_done
             if update_mask.any():
                 for k in range(self.horizon - 1):
@@ -78,11 +83,16 @@ class Ssqp:
             self.best_gamma[gamma_improved & ~line_search_done] = gamma[
                 gamma_improved & ~line_search_done
             ]
+            self.best_uact[uact_improved & ~line_search_done] = uact[
+                uact_improved & ~line_search_done
+            ]
 
             # Update alpha for failed batches
             failed_mask = ~update_mask & ~line_search_done
             if failed_mask.any():
                 alpha[failed_mask] *= 0.5
+        if not torch.all(line_search_done):
+            print("Line search failed: ", line_search_done)
 
     def check_termination(self):
         ## Lagrangian Gradient ##
@@ -105,18 +115,26 @@ class Ssqp:
             index_mask = dyn_inf_norm > max_dyn_viols
             max_dyn_viols[index_mask] = dyn_inf_norm[index_mask]
 
-            uact_viol = self.calc_underactuation_violation(
-                self.prob.stage_dynamics[k].g,
-                self.prob.states[k],
-                self.prob.controls[k],
-            )
-            uact_inf_norm = torch.norm(uact_viol, p=float("inf"), dim=1)
-            index_mask = uact_inf_norm > max_uact_viols
-            max_uact_viols[index_mask] = uact_inf_norm[index_mask]
+            if self.prob.stage_dynamics[k].type == "inverse":
+                uact_viol = self.calc_underactuation_violation(
+                    self.prob.stage_dynamics[k].g,
+                    self.prob.states[k],
+                    self.prob.controls[k],
+                )
+                uact_inf_norm = torch.norm(uact_viol, p=float("inf"), dim=1)
+                index_mask = uact_inf_norm > max_uact_viols
+                max_uact_viols[index_mask] = uact_inf_norm[index_mask]
 
         # terminate_Lx = max_Lx < self.eps
         # terminate_Lu = max_Lu < self.eps
-        print(self.terminated, max_dyn_viols, max_uact_viols)
+        print(
+            "Terminated environments: ",
+            self.terminated,
+            "max_dyn_viols: ",
+            max_dyn_viols,
+            "max_uact_viols: ",
+            max_uact_viols,
+        )
         terminate_dyn_viols = max_dyn_viols < self.eps
         terminate_uact_viols = max_uact_viols < self.eps
 
@@ -135,6 +153,7 @@ class Ssqp:
     def calc_metrics(self, x_cand, u_cand):
         cost = torch.zeros((self.n_batch))
         gamma = torch.zeros((self.n_batch))
+        uact = torch.zeros((self.n_batch))
         for k in range(self.horizon - 1):
             # Calculate total trajectory cost
             cost += self.prob.costs[k].l(x_cand[k], u_cand[k])
@@ -146,14 +165,22 @@ class Ssqp:
                 u_cand[k],
             )
             gamma += torch.norm(dyn_viol, p=float("inf"), dim=1)
+            if self.prob.stage_dynamics[k].type == "inverse":
+                uact_viol = self.calc_underactuation_violation(
+                    self.prob.stage_dynamics[k].g,
+                    x_cand[k],
+                    u_cand[k],
+                )
+                uact += torch.norm(uact_viol, p=float("inf"), dim=1)
         # Add final node cost
         cost += self.prob.costs[-1].l(x_cand[-1])
-        return cost, gamma
+        return cost, gamma, uact
 
     def calc_dynamics_violation(self, f, x_next, x, u):
         return x_next - f(x, u, self.prob.dt)
 
     def calc_underactuation_violation(self, g, x, u):
+        # print("g(x , u) = ", g(x, u)[0])
         return g(x, u)
 
     # Calculate Lagrangian gradients
