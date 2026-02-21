@@ -1,0 +1,82 @@
+<?xml version="1.0"?>
+<robot name="inverted_pendulum">
+    <!-- Material/Colors -->
+    <material name="PaleSlate">
+        <color rgba="0.769 0.792 0.816 1.0" />
+    </material>
+    <material name="Red">
+        <color rgba="0.769 0.271 0.212 1.0" />
+    </material>
+    <material name="GrayOlive">
+        <color rgba="0.529 0.549 0.561 1.0" />
+    </material>
+
+
+    <link name="world"/>
+    <joint name="world_slider" type="fixed">
+        <parent link="world" />
+        <child link="slideBar" />
+    </joint>
+
+    <!-- Links/Joints -->
+    <link name="slideBar">
+        <visual>
+            <origin rpy="0 0 0" xyz="0 -0.0125 0" />
+            <geometry>
+                <box size="0.5 0.005 0.005" />
+            </geometry>
+            <material name="GrayOlive" />
+        </visual>
+    </link>
+
+    <joint name="slider_to_cart" type="prismatic">
+        <parent link="slideBar" />
+        <child link="cart" />
+        <limit effort="5.0" lower="-15" upper="15" velocity="5" />
+        <origin rpy="0 0 0" xyz="0 0 0" />
+        <axis xyz="1 0 0" />
+    </joint>
+
+    <link name="cart">
+        <visual>
+            <origin rpy="0 0 0" xyz="0 -0.01 0.0" />
+            <geometry>
+                <box size="0.05 0.02 0.02" />
+            </geometry>
+            <material name="Red" />
+        </visual>
+
+        <collision>
+            <origin rpy="0 0 0" xyz="0 0 0.05" />
+            <geometry>
+                <box size="0.1143 0.0545 0.1143" />
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="cart_pole_joint" type="continuous">
+        <parent link="cart" />
+        <child link="pole" />
+        <limit effort="2.5" velocity="10.0" />
+        <origin rpy="0 0.0 0" xyz="0 0.0 0.0" />
+        <axis xyz="0 1 0" />
+        <dynamics damping="0.2" />
+    </joint>
+
+    <link name="pole">
+        <visual>
+            <origin rpy="0 0 0" xyz="0 0.005 -0.1" />
+            <geometry>
+                <box size="0.008 0.01 0.2" />
+            </geometry>
+            <material name="PaleSlate"/>
+        </visual>
+
+        <collision>
+            <origin rpy="0 0 0" xyz="0 0 0.5" />
+            <geometry>
+                <box size="0.008 0.01 0.2" />
+            </geometry>
+        </collision>
+    </link>
+</robot>
