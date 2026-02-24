@@ -32,11 +32,16 @@ class Ssqp:
         self.terminated = torch.zeros((self.n_batch), dtype=torch.bool)
 
         self.log = {
-            "iterations": 0,
+            "n_batch": self.n_batch,
+            "terminated": 0,
+            "ssqp_iterations": 0,
+            "t_solve_s": 0.0,
+            "cuda_reserved_bytes": 0,
+            "cuda_allocated_bytes": 0,
             "t_qp_solve": [0.0] * self.max_iter,
             "t_line_search": [0.0] * self.max_iter,
-            "t_solve": 0.0,
-            "terminated": torch.zeros((self.n_batch), dtype=torch.bool),
+            "max_dyn_viol": 0.0,
+            "max_uact_viol": 0.0,
         }
 
     def solve(self, max_iter=100):
@@ -74,9 +79,12 @@ class Ssqp:
         t_solve_end = time.time()
 
         # Fill log
-        self.log["t_solve"] = t_solve_end - t_solve_start
+        self.log["t_solve_s"] = t_solve_end - t_solve_start
         self.log["ssqp_iterations"] = iter + 1
-        self.log["terminated"] = self.terminated
+        self.log["terminated"] = torch.count_nonzero(self.terminated).item()
+        if torch.get_default_device() != "cpu":
+            self.log["cuda_reserved_bytes"] = torch.cuda.memory_reserved(0)
+            self.log["cuda_allocated_bytes"] = torch.cuda.memory_allocated(0)
         return self.log
 
     def step(self):
@@ -149,36 +157,27 @@ class Ssqp:
         max_dyn_viols = torch.zeros(self.n_batch)
         max_uact_viols = torch.zeros(self.n_batch)
         for k in range(self.horizon - 1):
-            dyn_viol = self.calc_dynamics_violation(
-                self.prob.stage_dynamics[k].f,
-                self.prob.states[k + 1],
-                self.prob.states[k],
-                self.prob.controls[k],
-            )
+            x0 = self.prob.states[k]
+            u0 = self.prob.controls[k]
+            x1 = self.prob.states[k + 1]
+            f = self.prob.stage_dynamics[k].f
+
+            dyn_viol = self.calc_dynamics_violation(f, x1, x0, u0)
             dyn_inf_norm = torch.norm(dyn_viol, p=float("inf"), dim=1)
             index_mask = dyn_inf_norm > max_dyn_viols
             max_dyn_viols[index_mask] = dyn_inf_norm[index_mask]
 
             if self.prob.stage_dynamics[k].type == "inverse":
-                uact_viol = self.calc_underactuation_violation(
-                    self.prob.stage_dynamics[k].g,
-                    self.prob.states[k],
-                    self.prob.controls[k],
-                )
+                g = self.prob.stage_dynamics[k].g
+                uact_viol = self.calc_underactuation_violation(g, x0, u0)
                 uact_inf_norm = torch.norm(uact_viol, p=float("inf"), dim=1)
                 index_mask = uact_inf_norm > max_uact_viols
                 max_uact_viols[index_mask] = uact_inf_norm[index_mask]
 
         # terminate_Lx = max_Lx < self.eps
         # terminate_Lu = max_Lu < self.eps
-        # print(
-        #     "Terminated environments: ",
-        #     self.terminated,
-        #     "max_dyn_viols: ",
-        #     max_dyn_viols,
-        #     "max_uact_viols: ",
-        #     max_uact_viols,
-        # )
+        self.log["max_dyn_viol"] = torch.norm(max_dyn_viols, p=float("inf")).item()
+        self.log["max_uact_viol"] = torch.norm(max_uact_viols, p=float("inf")).item()
         terminate_dyn_viols = max_dyn_viols < self.eps
         terminate_uact_viols = max_uact_viols < self.eps
 

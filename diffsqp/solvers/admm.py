@@ -27,19 +27,19 @@ class Admm:
         start = time.time()
         delta_x_qp, delta_u_qp, delta_pi_qp, delta_lam_qp = self.qp_solver.solve()
         end = time.time()
-        t_elapsed_qp = end - start
+        t_qp_solve = end - start
 
         # Update self.delta_x, self.delta_u
         self.update_deltas(delta_x_qp, delta_u_qp, delta_pi_qp, delta_lam_qp)
 
         # Return time elapsed for QP solve
-        return t_elapsed_qp
+        return t_qp_solve
 
     def solve(self):
         # Step
-        t_elapsed_qp = self.step()
+        t_qp_solve = self.step()
         # Return corrections
-        return self.delta_x, self.delta_u, self.delta_pi, self.delta_lam, t_elapsed_qp
+        return self.delta_x, self.delta_u, self.delta_pi, self.delta_lam, t_qp_solve
 
     def update_deltas(self, delta_x_bar, delta_u_bar, delta_pi_bar, delta_lam_bar):
         ##############################################

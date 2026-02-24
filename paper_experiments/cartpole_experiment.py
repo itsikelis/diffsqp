@@ -1,5 +1,5 @@
+import json
 import argparse
-import time
 import torch
 
 from diffsqp.problems import Problem
@@ -71,6 +71,15 @@ def main(args):
     solver = Ssqp(prob, qp_solver)
     info = solver.solve()
 
+    # Save solver logs to json
+    with open("log.json", "w") as f:
+        json.dump(info, f, indent=4)
+
+    # Save solution (states and controls)
+    if args.save:
+        torch.save(prob.states, "states.pt")
+        torch.save(prob.controls, "controls.pt")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -82,4 +91,5 @@ if __name__ == "__main__":
     parser.add_argument(
         "-std", type=float, help="Initial state noise standard deviation"
     )
+    parser.add_argument("-save", action="store_true", help="Save solution for viz")
     main(parser.parse_args())
