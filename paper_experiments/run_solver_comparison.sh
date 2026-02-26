@@ -1,9 +1,9 @@
 #! /bin/bash
 
 # Number of executions for each experiment
-N_RUNS=1
+N_RUNS=20
 N_BTCH=8
-STD=0.01
+STD=0.05
 DEV="cuda"
 DYN="inverse"
 

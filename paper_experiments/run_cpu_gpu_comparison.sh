@@ -1,8 +1,8 @@
 #! /bin/bash
 
 # Number of executions for each experiment
-N_RUNS=5
-STD=0.1
+N_RUNS=10
+STD=0.05
 
 devices="cpu cuda"
 dynamics="forward inverse"
@@ -27,7 +27,7 @@ for dev in $devices; do
             mkdir -p "${size}_envs"/
             cd "${size}_envs"/
             rm -rf *
-            uv run "${cwd}/paper_experiments/cartpole_experiment.py" -nb ${size} -model ${dyn} -qp lqr -dev ${dev} -task swingup -std 0.0
+            uv run "${cwd}/paper_experiments/cartpole_experiment.py" -nb ${size} -model ${dyn} -qp lqr -dev ${dev} -task swingup -std ${STD}
             cd ../
         done
         cd ../

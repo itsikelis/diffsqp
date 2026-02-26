@@ -45,7 +45,7 @@ class QPCVXPY:
     def solve(self):
         Q_qp, p_qp, G_qp, h_qp, A_qp, b_qp = self.generate_problem_()
 
-        (self.sol,) = self.qp(Q_qp, p_qp, A_qp, b_qp)
+        (sol,) = self.qp(Q_qp, p_qp, A_qp, b_qp)
 
         for i in range(self.horizon - 1):
             start = i * (self.nx + self.nu)
