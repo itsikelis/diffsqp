@@ -32,8 +32,10 @@ class QPCVXPY:
         problem = cp.Problem(objective, constraints)
         # assert problem.is_dpp()
 
-        self.qp = CvxpyLayer(problem, parameters=[Q, p, A, b], variables=[z])
-        self.sol = torch.zeros((self.n_batch, self.nvars))
+        device = torch.device("cuda")
+        self.qp = CvxpyLayer(
+            problem, parameters=[Q, p, A, b], variables=[z], solver=cp.CUCLARABEL
+        ).to(device)
 
         self.Dx = [None] * self.horizon
         self.Du = [None] * (self.horizon - 1)
