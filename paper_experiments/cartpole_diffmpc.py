@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from jax import config
 
-# config.update("jax_enable_x64", True)  # use double precision
+config.update("jax_enable_x64", True)  # use double precision
 
 import jax
 import jax.numpy as jnp
@@ -51,7 +51,7 @@ def main(args):
     solver_params["pcg"]["tol_epsilon"] = 1.0e-6
     solver_params["linesearch"] = True
     solver_params["warm_start_backward"] = False
-    solver_params["linesearch_alphas"] = [1.0]
+    solver_params["linesearch_alphas"] = [1.0, 0.5, 0.25, 0.125, 0.0625]
     solver = SQPSolver(program=problem, params=solver_params)
 
     def solve_single_instance(init_state):
@@ -87,6 +87,9 @@ def main(args):
         "num_iter": solutions.num_iter.tolist(),
         "status": solutions.status.tolist(),
         "convergence_error": solutions.convergence_error.tolist(),
+        "err_final_state": jnp.abs(
+            jnp.square(solutions.states[:, -1] - problem_params["final_state"])
+        ).tolist(),
     }
 
     with open("log.json", "w") as f:
