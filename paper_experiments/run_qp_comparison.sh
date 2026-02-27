@@ -1,14 +1,14 @@
 #! /bin/bash
 
 # Number of executions for each experiment
-N_RUNS=20
-N_BTCH=8
-STD=0.05
+N_RUNS=10
+N_BTCH=16
+STD=0.01
 DEV="cuda"
 DYN="inverse"
 
 solvers="lqr kkt qpth"
-tasks="swingup balance"
+tasks="swingup"
 
 # Save current directory path
 cwd=$(pwd)
