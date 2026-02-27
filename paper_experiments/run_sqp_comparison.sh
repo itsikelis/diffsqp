@@ -2,9 +2,9 @@
 
 # Number of executions for each experiment
 N_RUNS=10
-STD=0.01
+STD=0.001
+DEV=cuda
 
-devices="cpu cuda"
 dynamics="forward inverse"
 batch_sizes="1 8 32 128 512 2048 8192"
 
@@ -48,7 +48,7 @@ for dyn in $dynamics; do
             mkdir -p "run_$i"/
             cd "run_$i"/
             rm -rf *
-            uv run "${cwd}/cartpole_experiment.py" -nb ${size} -model ${dyn} -qp lqr -dev cuda -task balance -std ${STD}
+            uv run "${cwd}/cartpole_sqp.py" -nb ${size} -dev ${DEV} -model ${dyn} -std ${STD}
             cd ../
         done
         cd ../
