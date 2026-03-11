@@ -5,7 +5,7 @@ from diffsqp.costs import LqrCost, TerminalCost
 from diffsqp.dynamics import PendulumDynamics
 from diffsqp.solvers import Lqr
 from diffsqp.solvers import Admm
-from diffsqp.solvers import Ssqp
+from diffsqp.solvers import Sqp
 
 # torch.set_default_device("cuda")
 
@@ -44,7 +44,7 @@ prob.costs.append(final_cost)
 # solver = Admm(prob)
 # solver.step()
 
-solver = Ssqp(prob)
+solver = Sqp(prob)
 
 solver.solve()
 

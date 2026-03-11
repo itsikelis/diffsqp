@@ -10,7 +10,7 @@ from diffsqp.dynamics import (
 )
 from diffsqp.solvers import Lqr
 from diffsqp.solvers import Admm
-from diffsqp.solvers import Ssqp
+from diffsqp.solvers import Sqp
 
 from diffsqp.utils.animate import CartPoleAnimator
 
@@ -40,8 +40,8 @@ n_ctrl = dyn.nu
 #     ]
 # )
 x_des = torch.tensor([0.0, torch.pi, 0.0, 0.0]).repeat(n_batch, 1)
-x_init = x_des.clone()
-x_init[:, 0:2] += 0.001 * torch.randn((n_batch, 2))
+x_init = torch.tensor([0.0, 0.0, 0.0, 0.0]).repeat(n_batch, 1)
+x_init[:, 0:2] += 0.1 * torch.randn((n_batch, 2))
 
 prob = Problem(horizon, dt, n_state, n_ctrl)
 
@@ -55,10 +55,6 @@ Qf = qf_w * torch.eye(n_state).repeat(n_batch, 1, 1)
 
 # Set stage cost and constraints
 for i in range(horizon - 1):
-    if i == 0:
-        prob.states.append(x_init.clone())
-    else:
-        prob.states.append(x_des.clone())
     prob.states.append(x_init.clone())
     prob.controls.append(torch.zeros((n_batch, n_ctrl)))
     prob.costs.append(LqrCost(Q, R))
@@ -75,7 +71,7 @@ prob.costs.append(TerminalCost(Qf, x_des.clone()))
 
 # Create solver object
 qp_solver = Lqr(prob)
-solver = Ssqp(prob, qp_solver)
+solver = Sqp(prob, qp_solver)
 
 start = time.time()
 

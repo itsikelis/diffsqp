@@ -7,9 +7,9 @@ from diffsqp.problems import Problem
 from diffsqp.solvers import Admm
 
 
-class Ssqp:
+class Sqp:
     def __init__(
-        self, prob: Problem, qp_solver, max_iter=100, eps: float = 1e-4, eps_dx=1e-2
+        self, prob: Problem, qp_solver, max_iter=100, eps: float = 1e-4, eps_dx=1e-1
     ) -> None:
         self.max_iter = max_iter
         self.eps = eps

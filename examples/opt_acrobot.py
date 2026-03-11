@@ -9,7 +9,7 @@ from diffsqp.dynamics import AcrobotDynamics, AcrobotInverseDynamics
 from diffsqp.utils.animate import AcrobotAnimator
 from diffsqp.solvers import Lqr
 from diffsqp.solvers import Admm
-from diffsqp.solvers import Ssqp
+from diffsqp.solvers import Sqp
 
 # torch.set_default_dtype(torch.double)
 # torch.set_default_device("cuda")
@@ -73,7 +73,7 @@ prob.costs.append(TerminalCost(Qf, x_des.clone()))
 
 # Create solver object
 qp_solver = Lqr(prob)
-solver = Ssqp(prob, qp_solver, max_iter=1000)
+solver = Sqp(prob, qp_solver, max_iter=1000)
 
 start = time.time()
 
