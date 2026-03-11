@@ -16,5 +16,6 @@ wheels/
 *.pdf
 *.mp4
 
-# Experiment reults
+# Experiment results
 *.json
+*.pt
