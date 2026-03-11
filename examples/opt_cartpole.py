@@ -20,9 +20,9 @@ from diffsqp.utils.animate import CartPoleAnimator
 # dyn = CartPoleDynamics(mc=0.5, mp=0.3, lp=0.2, grav=9.81)
 dyn = CartPoleInverseDynamics(mc=0.5, mp=0.3, lp=0.2, grav=9.81)
 # dyn = CartPoleInverseDynamicsConstrained(mc=0.5, mp=0.3, lp=0.2, grav=9.81)
-dyn_c = CartPoleInverseDynamicsConstrained(
-    mc=0.5, mp=0.3, lp=0.2, constr_u=True, grav=9.81
-)
+# dyn_c = CartPoleInverseDynamicsConstrained(
+#     mc=0.5, mp=0.3, lp=0.2, constr_u=True, grav=9.81
+# )
 
 dt = 0.01
 tf = 1.0
@@ -39,29 +39,39 @@ n_ctrl = dyn.nu
 #         [-4.6296e-02, 2.8597e00, 2.8562e-01, 2.3995e00],
 #     ]
 # )
-x_init = 0.1 * torch.randn((n_batch, n_state))
 x_des = torch.tensor([0.0, torch.pi, 0.0, 0.0]).repeat(n_batch, 1)
+x_init = x_des.clone()
+x_init[:, 0:2] += 0.001 * torch.randn((n_batch, 2))
 
 prob = Problem(horizon, dt, n_state, n_ctrl)
 
-Q = 1e-6 * torch.eye(n_state).repeat(n_batch, 1, 1)
-R = 1e-3 * torch.eye(n_ctrl).repeat(n_batch, 1, 1)
-Qf = 1e5 * torch.eye(n_state).repeat(n_batch, 1, 1)
+q_w = torch.tensor([1e-6, 1e-6, 1e-6, 1e-6])
+r_w = torch.tensor([1e-3])
+qf_w = torch.tensor([1e5, 1e5, 1e5, 1e5])
+
+Q = q_w * torch.eye(n_state).repeat(n_batch, 1, 1)
+R = r_w * torch.eye(n_ctrl).repeat(n_batch, 1, 1)
+Qf = qf_w * torch.eye(n_state).repeat(n_batch, 1, 1)
 
 # Set stage cost and constraints
 for i in range(horizon - 1):
+    if i == 0:
+        prob.states.append(x_init.clone())
+    else:
+        prob.states.append(x_des.clone())
     prob.states.append(x_init.clone())
     prob.controls.append(torch.zeros((n_batch, n_ctrl)))
     prob.costs.append(LqrCost(Q, R))
-    if i == int(horizon / 2):
-        prob.stage_dynamics.append(dyn_c)
-    else:
-        prob.stage_dynamics.append(dyn)
+    prob.stage_dynamics.append(dyn)
+    # if i == int(horizon / 2):
+    #     prob.stage_dynamics.append(dyn_c)
+    # else:
+    #     prob.stage_dynamics.append(dyn)
 
 # Set terminal cost
 # prob.states.append(torch.zeros((n_batch, n_state)))
-prob.states.append(x_des)
-prob.costs.append(TerminalCost(Qf, x_des))
+prob.states.append(x_des.clone())
+prob.costs.append(TerminalCost(Qf, x_des.clone()))
 
 # Create solver object
 qp_solver = Lqr(prob)
@@ -79,7 +89,6 @@ end = time.time()
 print("Time elapsed: ", end - start, " s.")
 
 import matplotlib.pyplot as plt
-
 
 # def plot_states(states_list):
 #     # 1. Stack the list of tensors into one tensor: (horizon, n_batch, n_x)

@@ -1,9 +1,12 @@
 import time
 import torch
 
+import numpy as np
+
 from diffsqp.problems import Problem
 from diffsqp.costs import LqrCost, TerminalCost
 from diffsqp.dynamics import AcrobotDynamics, AcrobotInverseDynamics
+from diffsqp.utils.animate import AcrobotAnimator
 from diffsqp.solvers import Lqr
 from diffsqp.solvers import Admm
 from diffsqp.solvers import Ssqp
@@ -11,8 +14,28 @@ from diffsqp.solvers import Ssqp
 # torch.set_default_dtype(torch.double)
 # torch.set_default_device("cuda")
 
-dyn = AcrobotDynamics(m1=0.1, m2=0.1, l1=0.3, l2=0.3, grav=9.81)
-# dyn = AcrobotInverseDynamics(m1=0.1, m2=0.1, l1=0.3, l2=0.3, grav=9.81)
+dyn = AcrobotInverseDynamics(
+    m1=1.0,
+    m2=1.0,
+    l1=0.5,
+    l2=0.5,
+    lc1=0.5,
+    lc2=0.5,
+    grav=9.81,
+    I2=1 / (3.0 * 1.0 * 0.5**2),
+    I1=1 / (3.0 * 1.0 * 0.5**2),
+)
+
+## Shivesh acrobot parametres
+# m1=0.10548177618443695,
+# m2=0.07619744360415454,
+# l1=0.05,
+# l2=0.05,
+# lc1=0.05,
+# lc2=0.03670036749567022,
+# grav=9.81,
+# I2=0.00023702395072092597,
+# I1=0.00046166221821039165,
 
 dt = 0.01
 tf = 1.0
@@ -21,41 +44,43 @@ n_batch = 4
 n_state = dyn.nx
 n_ctrl = dyn.nu
 
-# x_init = torch.tensor(
-#     [
-#         [0.0, 0.0, 0.0, 0.0],
-#         [0.0, torch.pi, 0.0, 0.0],
-#         [0.0, torch.pi, 0.0, 0.0],
-#         [-4.6296e-02, 2.8597e00, 2.8562e-01, 2.3995e00],
-#     ]
-# )
-x_init = 0.0 * torch.randn((n_batch, n_state))
-x_des = torch.tensor([torch.pi, torch.pi, 0.0, 0.0]).repeat(n_batch, 1)
+x_init = torch.tensor([torch.pi, 0.0, 0.0, 0.0]).repeat(n_batch, 1)
+x_init[:, 0:2] += 0.2 * torch.randn((n_batch, 2))
+x_des = torch.tensor([torch.pi, 0.0, 0.0, 0.0]).repeat(n_batch, 1)
 
 prob = Problem(horizon, dt, n_state, n_ctrl)
 
-Q = 1e-6 * torch.eye(n_state).repeat(n_batch, 1, 1)
-R = 1e-3 * torch.eye(n_ctrl).repeat(n_batch, 1, 1)
-Qf = 1e5 * torch.eye(n_state).repeat(n_batch, 1, 1)
+q_w = torch.tensor([1e-6, 1e-6, 1e-6, 1e-6])
+r_w = torch.tensor([1e-1])
+qf_w = torch.tensor([4e8, 4e8, 1e5, 1e5])
+
+Q = q_w * torch.eye(n_state).repeat(n_batch, 1, 1)
+R = r_w * torch.eye(n_ctrl).repeat(n_batch, 1, 1)
+Qf = qf_w * torch.eye(n_state).repeat(n_batch, 1, 1)
 
 # Set stage cost and constraints
 for i in range(horizon - 1):
-    prob.states.append(x_init.clone())
+    if i == 0:
+        prob.states.append(x_init.clone())
+    else:
+        prob.states.append(x_des.clone())
     prob.controls.append(torch.zeros((n_batch, n_ctrl)))
-    prob.costs.append(LqrCost(Q, R))
+    prob.costs.append(LqrCost(Q, R, x_des.clone()))
     prob.stage_dynamics.append(dyn)
-# Set terminal cost
-# prob.states.append(torch.zeros((n_batch, n_state)))
-prob.states.append(x_des)
-prob.costs.append(TerminalCost(Qf, x_des))
+# Set terminal cost prob.states.append(torch.zeros((n_batch, n_state)))
+prob.states.append(x_des.clone())
+prob.costs.append(TerminalCost(Qf, x_des.clone()))
 
 # Create solver object
 qp_solver = Lqr(prob)
-solver = Ssqp(prob, qp_solver)
+solver = Ssqp(prob, qp_solver, max_iter=1000)
 
 start = time.time()
 
-solver.solve()
+try:
+    solver.solve()
+except KeyboardInterrupt:
+    print("Keyboard  Interrupt")
 
 end = time.time()
 print("Time elapsed: ", end - start, " s.")
@@ -89,5 +114,8 @@ def plot_states(states_list):
 
 
 plot_states(prob.states)
+
+anim = AcrobotAnimator(np.array(prob.states), dyn.l1, dyn.l2, dt, n_batch)
+anim.animate(step_size=2)
 
 print(solver.terminated)
