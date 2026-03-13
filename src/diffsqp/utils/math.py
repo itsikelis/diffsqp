@@ -2,8 +2,14 @@ import torch
 
 
 def mm(A, B):
-    return torch.bmm(A, B)
+    if len(A.shape) == 2:
+        return A @ B
+    else:
+        return torch.bmm(A, B)
 
 
 def mv(A, b):
-    return torch.bmm(A, b.unsqueeze(2)).squeeze(2)
+    if len(A.shape) == 2:
+        return (A @ b.unsqueeze(2)).squeeze(2)
+    else:
+        return torch.bmm(A, b.unsqueeze(2)).squeeze(2)

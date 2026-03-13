@@ -29,30 +29,6 @@ class CartPoleInverseDynamicsConstrained(Dynamics):
         self.lp = lp
         self.grav = grav
 
-    def fc(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        """
-        Continuous time dynamics: x_dot = fc(x_k, u_k)
-        """
-
-        ds = x[:, 2:3]
-        dth = x[:, 3:4]
-        dds = u[:, 0:1]
-        ddth = u[:, 1:2]
-
-        return torch.cat([ds, dth, dds, ddth], dim=1)
-
-    def fcx(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        n_batch = x.shape[0]
-        grad = torch.zeros(self.nx, self.nx).repeat(n_batch, 1, 1)
-        grad[:, 0 : self.nv, self.nv :] = torch.eye(self.nv)
-        return grad
-
-    def fcu(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        n_batch = x.shape[0]
-        grad = torch.zeros(self.nx, self.nu).repeat(n_batch, 1, 1)
-        grad[:, self.nv :, :] = torch.eye(self.nu)
-        return grad
-
     def g(self, x: torch.Tensor, u: torch.Tensor):
         n_batch = x.shape[0]
         mc = self.mc

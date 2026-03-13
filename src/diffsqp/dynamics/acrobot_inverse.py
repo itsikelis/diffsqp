@@ -17,11 +17,8 @@ class AcrobotInverseDynamics(Dynamics):
         I1=None,
         I2=None,
     ):
+        super().__init__(nx=4, nu=2, nq=2, nv=2)
         self.type = "inverse"
-        self.nx = 4
-        self.nq = 2
-        self.nv = 2
-        self.nu = 2
         self.ng = 1
 
         self.m1 = m1
@@ -34,30 +31,6 @@ class AcrobotInverseDynamics(Dynamics):
 
         self.I1 = I1 if I1 is not None else (self.m1 * self.l1**2) / 3.0
         self.I2 = I2 if I1 is not None else (self.m2 * self.l2**2) / 3.0
-
-    def fc(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        """
-        Continuous time dynamics: x_dot = fc(x_k, u_k)
-        """
-
-        dth1 = x[:, 2:3]
-        dth2 = x[:, 3:4]
-        ddth1 = u[:, 0:1]
-        ddth2 = u[:, 1:2]
-
-        return torch.cat([dth1, dth2, ddth1, ddth2], dim=1)
-
-    def fcx(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        n_batch = x.shape[0]
-        grad = torch.zeros(self.nx, self.nx).repeat(n_batch, 1, 1)
-        grad[:, 0 : self.nv, self.nv :] = torch.eye(self.nv)
-        return grad
-
-    def fcu(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        n_batch = x.shape[0]
-        grad = torch.zeros(self.nx, self.nu).repeat(n_batch, 1, 1)
-        grad[:, self.nv :, :] = torch.eye(self.nu)
-        return grad
 
     def g(self, x: torch.Tensor, u: torch.Tensor):
         n_batch = x.shape[0]
