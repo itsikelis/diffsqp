@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 
 from diffsqp.costs import Cost, TerminalCost
 from diffsqp.dynamics import Dynamics
+from diffsqp.constraints import Constraint
 
 
 class Problem(ABC):
@@ -13,6 +14,7 @@ class Problem(ABC):
         self.nu = nu
         self.costs: List[Cost | TerminalCost] = []
         self.stage_dynamics: List[Dynamics] = []
+        self.constraints: List[Constraints] = [None] * self.horizon
         self.states: List[torch.Tensor] = []
         self.controls: List[torch.Tensor] = []
         self.costates: List[torch.Tensor] = []

@@ -3,28 +3,28 @@ import torch
 
 from diffsqp.problems import Problem
 from diffsqp.costs import LqrCost, TerminalCost
-from diffsqp.dynamics import (
-    CartPoleDynamics,
-    CartPoleInverseDynamics,
-    CartPoleInverseDynamicsConstrained,
-)
 from diffsqp.solvers import Lqr
 from diffsqp.solvers import Admm
 from diffsqp.solvers import Sqp
+from diffsqp.dynamics import Dynamics
+from diffsqp.constraints import CartPoleUnderactuation
 
 from diffsqp.utils.animate import CartPoleAnimator
 
 # torch.set_default_dtype(torch.double)
 # torch.set_default_device("cuda")
 
-dyn = CartPoleDynamics(mc=0.5, mp=0.3, lp=0.2, grav=9.81)
 
+lp = 0.2
 dt = 0.01
 tf = 1.0
 horizon = int(tf / dt)
 nB = 2
-nx = dyn.nx
-nu = dyn.nu
+nx = 4
+nu = 2
+
+dyn = Dynamics(nx=nx, nu=nu, nq=2, nv=2)
+uact = CartPoleUnderactuation(mc=0.5, mp=0.3, lp=lp, grav=9.81)
 
 # x_init = torch.tensor(
 #     [
@@ -53,10 +53,7 @@ for i in range(horizon - 1):
     prob.controls.append(torch.zeros((nB, nu)))
     prob.costs.append(LqrCost(Q, R))
     prob.stage_dynamics.append(dyn)
-    # if i == int(horizon / 2):
-    #     prob.stage_dynamics.append(dyn_c)
-    # else:
-    #     prob.stage_dynamics.append(dyn)
+    prob.constraints[i] = uact
 
 # Set terminal cost
 # prob.states.append(torch.zeros((nB, nx)))
@@ -111,6 +108,6 @@ print(solver.terminated)
 
 import numpy as np
 
-anim = CartPoleAnimator(np.array(prob.states), dyn.lp, dt, nB)
+anim = CartPoleAnimator(np.array(prob.states), lp, dt, nB)
 anim.animate(step_size=2)
 # anim.save(filename="four_batches.mp4", step_size=2)

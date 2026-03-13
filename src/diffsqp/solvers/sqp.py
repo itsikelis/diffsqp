@@ -203,8 +203,8 @@ class Sqp:
             index_mask = dyn_inf_norm > max_dyn_viols
             max_dyn_viols[index_mask] = dyn_inf_norm[index_mask]
 
-            if self.prob.stage_dynamics[k].type == "inverse":
-                g = self.prob.stage_dynamics[k].g
+            if self.prob.constraints[k]:
+                g = self.prob.constraints[k].g
                 uact_viol = self.calc_underactuation_violation(g, x0, u0)
                 uact_inf_norm = torch.norm(uact_viol, p=float("inf"), dim=1)
                 index_mask = uact_inf_norm > max_uact_viols
@@ -246,9 +246,9 @@ class Sqp:
                 u_cand[k],
             )
             gamma += torch.norm(dyn_viol, p=float("inf"), dim=1)
-            if self.prob.stage_dynamics[k].type == "inverse":
+            if self.prob.constraints[k]:
                 uact_viol = self.calc_underactuation_violation(
-                    self.prob.stage_dynamics[k].g,
+                    self.prob.constraints[k].g,
                     x_cand[k],
                     u_cand[k],
                 )

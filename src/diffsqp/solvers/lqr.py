@@ -50,11 +50,17 @@ class Lqr:
             Q, R, S, q, r = self.calc_linearized_cost_terms_(
                 x_lin, u_lin, self.prob.costs[i]
             )
-            self.A[i], self.B[i], self.b[i], C, D, e = (
-                self.calc_linearized_dynamic_terms_(
-                    x_lin, u_lin, x_next, self.prob.stage_dynamics[i]
-                )
+            self.A[i], self.B[i], self.b[i] = self.calc_linearized_dynamics_terms_(
+                x_lin, u_lin, x_next, self.prob.stage_dynamics[i]
             )
+
+            C = None
+            D = None
+            e = None
+            if self.prob.constraints[i]:
+                C, D, e = self.calc_linearized_constraint_terms_(
+                    x_lin, u_lin, x_next, self.prob.constraints[i]
+                )
 
             (
                 self.K[i],
@@ -210,19 +216,18 @@ class Lqr:
         S = c.lux(x_lin, u_lin)
         return Q, R, S, q, r
 
-    def calc_linearized_dynamic_terms_(self, x_lin, u_lin, x_next, dynamics):
+    def calc_linearized_dynamics_terms_(self, x_lin, u_lin, x_next, dynamics):
         x_pred = dynamics.f(x_lin, u_lin, self.prob.dt)
         b = x_pred - x_next
         A = dynamics.fx(x_lin, u_lin, self.prob.dt)
         B = dynamics.fu(x_lin, u_lin, self.prob.dt)
-        C = None
-        D = None
-        e = None
-        if dynamics.type == "inverse":
-            C = dynamics.gx(x_lin, u_lin)
-            D = dynamics.gu(x_lin, u_lin)
-            e = dynamics.g(x_lin, u_lin)
-        return A, B, b, C, D, e
+        return A, B, b
+
+    def calc_linearized_constraint_terms_(self, x_lin, u_lin, x_next, dynamics):
+        C = dynamics.gx(x_lin, u_lin)
+        D = dynamics.gu(x_lin, u_lin)
+        e = dynamics.g(x_lin, u_lin)
+        return C, D, e
 
     def calc_final_cost_terms_(self, x_N, final_cost):
         V = final_cost.lxx(x_N)
