@@ -237,7 +237,7 @@ class Sqp:
         uact = torch.zeros((self.nB))
         for k in range(self.horizon - 1):
             # Calculate total trajectory cost
-            cost += self.prob.costs[k].l(x_cand[k], u_cand[k])
+            cost += self.prob.l(k, x_cand[k], u_cand[k])
             # Calculate constraint violations
             dyn_viol = self.calc_dynamics_violation(
                 self.prob.stage_dynamics[k].f,
@@ -254,7 +254,7 @@ class Sqp:
                 )
                 uact += torch.norm(uact_viol, p=float("inf"), dim=1)
         # Add final node cost
-        cost += self.prob.costs[-1].l(x_cand[-1])
+        cost += self.prob.l(-1, x_cand[-1])
         return cost, gamma, uact
 
     def calc_dynamics_violation(self, f, x_next, x, u):
@@ -273,15 +273,14 @@ class Sqp:
             u = self.prob.controls[k]
             pi = self.pi[k]
             lam = self.lam[k]
-            lx = self.prob.costs[k].lx
-            lu = self.prob.costs[k].lu
+            lx = self.prob.lx
+            lu = self.prob.lu
             fx = self.prob.stage_dynamics[k].fx
             fu = self.prob.stage_dynamics[k].fu
-            Lx += lx(x, u) + mv(torch.transpose(fx(x, u, dt), 1, 2), pi)
-            Lu += lu(x, u) + mv(torch.transpose(fu(x, u, dt), 1, 2), pi)
+            Lx += lx(k, x, u) + mv(torch.transpose(fx(x, u, dt), 1, 2), pi)
+            Lu += lu(k, x, u) + mv(torch.transpose(fu(x, u, dt), 1, 2), pi)
         # Add final node cost
         x_N = self.prob.states[-1]
-        lx_N = self.prob.costs[-1].lx
-        Lx += lx_N(x)
+        Lx += self.prob.lx(-1, x_N)
 
         return Lx, Lu

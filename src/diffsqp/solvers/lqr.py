@@ -41,15 +41,13 @@ class Lqr:
 
     def backward_pass_(self):
         x_N = self.prob.states[self.horizon - 1]
-        self.V[-1], self.v[-1] = self.calc_final_cost_terms_(x_N, self.prob.costs[-1])
+        self.V[-1], self.v[-1] = self.calc_final_cost_terms_(x_N)
         for i in range(self.horizon - 2, -1, -1):
             x_lin = self.prob.states[i]
             u_lin = self.prob.controls[i]
             x_next = self.prob.states[i + 1]
 
-            Q, R, S, q, r = self.calc_linearized_cost_terms_(
-                x_lin, u_lin, self.prob.costs[i]
-            )
+            Q, R, S, q, r = self.calc_linearized_cost_terms_(i, x_lin, u_lin)
             self.A[i], self.B[i], self.b[i] = self.calc_linearized_dynamics_terms_(
                 x_lin, u_lin, x_next, self.prob.stage_dynamics[i]
             )
@@ -208,12 +206,12 @@ class Lqr:
 
         return Dx, Du, Dpi, Dlam
 
-    def calc_linearized_cost_terms_(self, x_lin, u_lin, c):
-        Q = c.lxx(x_lin, u_lin)
-        q = c.lx(x_lin, u_lin)
-        R = c.luu(x_lin, u_lin)
-        r = c.lu(x_lin, u_lin)
-        S = c.lux(x_lin, u_lin)
+    def calc_linearized_cost_terms_(self, stage_idx, x_lin, u_lin):
+        Q = self.prob.lxx(stage_idx, x_lin, u_lin)
+        q = self.prob.lx(stage_idx, x_lin, u_lin)
+        R = self.prob.luu(stage_idx, x_lin, u_lin)
+        r = self.prob.lu(stage_idx, x_lin, u_lin)
+        S = self.prob.lux(stage_idx, x_lin, u_lin)
         return Q, R, S, q, r
 
     def calc_linearized_dynamics_terms_(self, x_lin, u_lin, x_next, dynamics):
@@ -229,7 +227,7 @@ class Lqr:
         e = dynamics.g(x_lin, u_lin)
         return C, D, e
 
-    def calc_final_cost_terms_(self, x_N, final_cost):
-        V = final_cost.lxx(x_N)
-        v = final_cost.lx(x_N)
+    def calc_final_cost_terms_(self, x_N):
+        V = self.prob.lxx(-1, x_N)
+        v = self.prob.lx(-1, x_N)
         return V, v

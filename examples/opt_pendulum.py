@@ -21,21 +21,19 @@ prob = Problem(horizon, dt, nx, nu)
 dyn = PendulumDynamics(m=1.0, l=1.0, b=0.2, grav=9.81)
 Q = 1e-5 * torch.eye(nx).repeat(nB, 1, 1)
 R = 1e-3 * torch.eye(nu).repeat(nB, 1, 1)
-cost = LqrCost(Q, R)
 
 Qf = 1e6 * torch.eye(nx).repeat(nB, 1, 1)
-final_cost = TerminalCost(Qf, x_des)
 
 # Set stage cost and constraints
 for i in range(horizon - 1):
     prob.states.append(torch.zeros((nB, nx)))
     prob.controls.append(torch.zeros((nB, nu)))
-    prob.costs.append(cost)
+    prob.costs.append([LqrCost(Q, R)])
     prob.stage_dynamics.append(dyn)
 # Set terminal cost
 # prob.states.append(torch.zeros((nB, nx)))
 prob.states.append(x_des)
-prob.costs.append(final_cost)
+prob.costs.append([TerminalCost(Qf, x_des)])
 
 # Create solver object
 # solver = Lqr(prob)

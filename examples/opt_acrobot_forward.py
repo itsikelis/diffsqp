@@ -1,6 +1,5 @@
 import time
 import torch
-
 import numpy as np
 
 from diffsqp.problems import Problem
@@ -14,18 +13,6 @@ from diffsqp.solvers import Sqp
 # torch.set_default_dtype(torch.double)
 # torch.set_default_device("cuda")
 
-dyn = AcrobotDynamics(
-    m1=1.0,
-    m2=1.0,
-    l1=0.5,
-    l2=0.5,
-    lc1=0.5,
-    lc2=0.5,
-    grav=9.81,
-    I2=1 / (3.0 * 1.0 * 0.5**2),
-    I1=1 / (3.0 * 1.0 * 0.5**2),
-)
-
 ## Shivesh acrobot parametres
 # m1=0.10548177618443695,
 # m2=0.07619744360415454,
@@ -37,12 +24,26 @@ dyn = AcrobotDynamics(
 # I2=0.00023702395072092597,
 # I1=0.00046166221821039165,
 
+l1 = 0.5
+l2 = 0.5
 dt = 0.01
 tf = 1.0
 horizon = int(tf / dt)
-nB = 4
-nx = dyn.nx
-nu = dyn.nu
+nB = 3
+nx = 4
+nu = 2
+
+dyn = AcrobotDynamics(
+    m1=1.0,
+    m2=1.0,
+    l1=l1,
+    l2=l2,
+    lc1=0.5,
+    lc2=0.5,
+    grav=9.81,
+    I2=1 / (3.0 * 1.0 * 0.5**2),
+    I1=1 / (3.0 * 1.0 * 0.5**2),
+)
 
 x_init = torch.tensor([torch.pi, 0.0, 0.0, 0.0]).repeat(nB, 1)
 x_init[:, 0:2] += 0.2 * torch.randn((nB, 2))
@@ -60,29 +61,25 @@ Qf = qf_w * torch.eye(nx).repeat(nB, 1, 1)
 
 # Set stage cost and constraints
 for i in range(horizon - 1):
-    if i == 0:
-        prob.states.append(x_init.clone())
-    else:
-        prob.states.append(x_des.clone())
+    prob.states.append(x_init.clone())
     prob.controls.append(torch.zeros((nB, nu)))
-    prob.costs.append(LqrCost(Q, R, x_des.clone()))
+    prob.costs.append([LqrCost(Q, R)])
     prob.stage_dynamics.append(dyn)
 # Set terminal cost
 prob.states.append(x_des.clone())
-prob.costs.append(TerminalCost(Qf, x_des.clone()))
+prob.costs.append([TerminalCost(Qf, x_des.clone())])
 
 # Create solver object
 qp_solver = Lqr(prob)
-solver = Sqp(prob, qp_solver, max_iter=1000)
+solver = Sqp(prob, qp_solver)
 
 start = time.time()
-
 try:
     solver.solve()
 except KeyboardInterrupt:
     print("Keyboard  Interrupt")
-
 end = time.time()
+
 print("Time elapsed: ", end - start, " s.")
 
 import matplotlib.pyplot as plt

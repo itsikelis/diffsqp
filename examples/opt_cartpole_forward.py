@@ -3,11 +3,7 @@ import torch
 
 from diffsqp.problems import Problem
 from diffsqp.costs import LqrCost, TerminalCost
-from diffsqp.dynamics import (
-    CartPoleDynamics,
-    CartPoleInverseDynamics,
-    CartPoleInverseDynamicsConstrained,
-)
+from diffsqp.dynamics import CartPoleDynamics
 from diffsqp.solvers import Lqr
 from diffsqp.solvers import Admm
 from diffsqp.solvers import Sqp
@@ -51,31 +47,25 @@ Qf = qf_w * torch.eye(nx).repeat(nB, 1, 1)
 for i in range(horizon - 1):
     prob.states.append(x_init.clone())
     prob.controls.append(torch.zeros((nB, nu)))
-    prob.costs.append(LqrCost(Q, R))
+    prob.costs.append([LqrCost(Q, R)])
     prob.stage_dynamics.append(dyn)
-    # if i == int(horizon / 2):
-    #     prob.stage_dynamics.append(dyn_c)
-    # else:
-    #     prob.stage_dynamics.append(dyn)
 
 # Set terminal cost
 # prob.states.append(torch.zeros((nB, nx)))
 prob.states.append(x_des.clone())
-prob.costs.append(TerminalCost(Qf, x_des.clone()))
+prob.costs.append([TerminalCost(Qf, x_des.clone())])
 
 # Create solver object
 qp_solver = Lqr(prob)
 solver = Sqp(prob, qp_solver)
 
 start = time.time()
-
-info = solver.solve()
-print("max_c_viol: ", info["max_uact_viol"])
-print("u_k-1: ", prob.controls[int(horizon / 2) - 1][0])
-print("u-k: ", prob.controls[int(horizon / 2)][0])
-print("u-k+1: ", prob.controls[int(horizon / 2) + 1][0])
-
+try:
+    info = solver.solve()
+except KeyboardInterrupt:
+    print("Keyboard  Interrupt")
 end = time.time()
+
 print("Time elapsed: ", end - start, " s.")
 
 import matplotlib.pyplot as plt
@@ -106,8 +96,6 @@ import matplotlib.pyplot as plt
 #
 #
 # plot_states(prob.states)
-
-print(solver.terminated)
 
 import numpy as np
 

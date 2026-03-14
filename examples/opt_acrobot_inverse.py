@@ -1,15 +1,15 @@
 import time
 import torch
+import numpy as np
 
 from diffsqp.problems import Problem
 from diffsqp.costs import LqrCost, TerminalCost
+from diffsqp.dynamics import Dynamics
+from diffsqp.constraints import AcrobotUnderactuation
+from diffsqp.utils.animate import AcrobotAnimator
 from diffsqp.solvers import Lqr
 from diffsqp.solvers import Admm
 from diffsqp.solvers import Sqp
-from diffsqp.dynamics import Dynamics
-from diffsqp.constraints import AcrobotUnderactuation
-
-from diffsqp.utils.animate import AcrobotAnimator
 
 # torch.set_default_dtype(torch.double)
 # torch.set_default_device("cuda")
@@ -47,7 +47,6 @@ uact = AcrobotUnderactuation(
     I1=1 / (3.0 * 1.0 * 0.5**2),
 )
 
-
 x_init = torch.tensor([torch.pi, 0.0, 0.0, 0.0]).repeat(nB, 1)
 x_init[:, 0:2] += 0.2 * torch.randn((nB, 2))
 x_des = torch.tensor([torch.pi, 0.0, 0.0, 0.0]).repeat(nB, 1)
@@ -66,23 +65,24 @@ Qf = qf_w * torch.eye(nx).repeat(nB, 1, 1)
 for i in range(horizon - 1):
     prob.states.append(x_init.clone())
     prob.controls.append(torch.zeros((nB, nu)))
-    prob.costs.append(LqrCost(Q, R))
+    prob.costs.append([LqrCost(Q, R)])
     prob.stage_dynamics.append(dyn)
     prob.constraints[i] = uact
 # Set terminal cost
 prob.states.append(x_des.clone())
-prob.costs.append(TerminalCost(Qf, x_des.clone()))
+prob.costs.append([TerminalCost(Qf, x_des.clone())])
 
 # Create solver object
 qp_solver = Lqr(prob)
 solver = Sqp(prob, qp_solver)
 
 start = time.time()
-
-info = solver.solve()
-print("max_c_viol: ", info["max_uact_viol"])
-
+try:
+    info = solver.solve()
+except KeyboardInterrupt:
+    print("Keyboard  Interrupt")
 end = time.time()
+
 print("Time elapsed: ", end - start, " s.")
 
 import matplotlib.pyplot as plt
@@ -114,8 +114,6 @@ def plot_states(states_list):
 
 
 plot_states(prob.states)
-
-import numpy as np
 
 anim = AcrobotAnimator(np.array(prob.states), l1, l2, dt, nB)
 anim.animate(step_size=2)
