@@ -14,7 +14,6 @@ from diffsqp.utils.animate import CartPoleAnimator
 # torch.set_default_dtype(torch.double)
 # torch.set_default_device("cuda")
 
-
 lp = 0.2
 dt = 0.01
 tf = 1.0
