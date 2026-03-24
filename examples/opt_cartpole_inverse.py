@@ -4,8 +4,7 @@ import torch
 from diffsqp.problems import Problem
 from diffsqp.costs import LqrCost
 from diffsqp.solvers import Lqr
-from diffsqp.solvers import Admm
-from diffsqp.solvers import Sqp
+from diffsqp.solvers import Sqp, SqpParams
 from diffsqp.dynamics import Dynamics
 from diffsqp.constraints import CartPoleUnderactuation
 
@@ -20,7 +19,7 @@ lp = 0.2
 dt = 0.01
 tf = 1.0
 horizon = int(tf / dt)
-nB = 2
+n_B = 2
 nx = 4
 nu = 2
 
@@ -35,18 +34,18 @@ uact = CartPoleUnderactuation(mc=0.5, mp=0.3, lp=lp, grav=9.81)
 #         [-4.6296e-02, 2.8597e00, 2.8562e-01, 2.3995e00],
 #     ]
 # )
-x_des = torch.tensor([0.0, torch.pi, 0.0, 0.0]).repeat(nB, 1)
-x_init = torch.tensor([0.0, 0.0, 0.0, 0.0]).repeat(nB, 1)
-x_init[:, 0:2] += 0.1 * torch.randn((nB, 2))
+x_des = torch.tensor([0.0, torch.pi, 0.0, 0.0]).repeat(n_B, 1)
+x_init = torch.tensor([0.0, 0.0, 0.0, 0.0]).repeat(n_B, 1)
+x_init[:, 0:2] += 0.1 * torch.randn((n_B, 2))
 
-prob = Problem(horizon, dt, nB, nx, nu)
+prob = Problem(horizon, dt, n_B, nx, nu)
 q_w = torch.tensor([1e-6, 1e-6, 1e-6, 1e-6])
 r_w = torch.tensor([1e-3])
 qf_w = torch.tensor([1e5, 1e5, 1e5, 1e5])
 
-Q = q_w * torch.eye(nx).repeat(nB, 1, 1)
-R = r_w * torch.eye(nu).repeat(nB, 1, 1)
-Qf = qf_w * torch.eye(nx).repeat(nB, 1, 1)
+Q = q_w * torch.eye(nx).repeat(n_B, 1, 1)
+R = r_w * torch.eye(nu).repeat(n_B, 1, 1)
+Qf = qf_w * torch.eye(nx).repeat(n_B, 1, 1)
 
 # Set stage cost and constraints
 for i in range(horizon - 1):
@@ -56,13 +55,13 @@ for i in range(horizon - 1):
     prob.constraints[i] = [uact]
 
 # Set terminal cost
-# prob.states.append(torch.zeros((nB, nx)))
+# prob.states.append(torch.zeros((n_B, nx)))
 prob.states[-1] = x_des.clone()
 prob.costs.append([LqrCost(Q=Qf, x_des=x_des.clone())])
 
 # Create solver object
-qp_solver = Lqr(prob)
-solver = Sqp(prob, qp_solver)
+sqp_params = SqpParams(qp_solver="lqr", n_B=n_B, max_iter=500, eps=1e-4)
+solver = Sqp(prob, sqp_params)
 
 start = time.time()
 try:
@@ -76,7 +75,7 @@ print("Time elapsed: ", end - start, " s.")
 import matplotlib.pyplot as plt
 
 # def plot_states(states_list):
-#     # 1. Stack the list of tensors into one tensor: (horizon, nB, n_x)
+#     # 1. Stack the list of tensors into one tensor: (horizon, n_B, n_x)
 #     states_tensor = torch.stack(states_list)
 #
 #     # 2. Extract the first batch (index 0) and convert to numpy
@@ -104,6 +103,6 @@ import matplotlib.pyplot as plt
 
 import numpy as np
 
-anim = CartPoleAnimator(np.array(prob.states), lp, dt, nB)
+anim = CartPoleAnimator(np.array(prob.states), lp, dt, n_B)
 anim.animate(step_size=2)
 # anim.save(filename="four_batches.mp4", step_size=2)

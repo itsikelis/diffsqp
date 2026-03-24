@@ -2,27 +2,52 @@ import sys
 import time
 import torch
 from diffsqp.utils.math import mm, mv
+from typing import List
 
 from diffsqp.problems import Problem
-from diffsqp.solvers import Admm
+from diffsqp.solvers import Lqr
+from dataclasses import dataclass
+
+
+@dataclass
+class SqpParams:
+    qp_solver: str
+    n_B: int
+    max_iter: int
+    eps: float
+
+
+@dataclass
+class SqpIterationLog:
+    # QP stuff
+    qp_delta_x: List[torch.Tensor]
+    qp_delta_u: List[torch.Tensor]
+    qp_delta_pi: List[torch.Tensor]
+    qp_delta_nu: List[torch.Tensor]
+
+    # ADMM stuff
+    admm_delta_x: List[torch.Tensor]
+    admm_delta_u: List[torch.Tensor]
+    admm_delta_pi: List[torch.Tensor]
+    admm_delta_nu: List[torch.Tensor]
+
+    # Logging
+    sqp_iterations: int
+    termination_time_s: int
+    cuda_reserved_bytes: int
+    cuda_allocated_bytes: int
 
 
 class Sqp:
-    def __init__(
-        self, prob: Problem, qp_solver, max_iter=100, eps: float = 1e-4, eps_dx=1e-1
-    ) -> None:
-        self.max_iter = max_iter
-        self.eps = eps
-        self.eps_dx = eps_dx
-
+    def __init__(self, prob: Problem, params: SqpParams) -> None:
         self.prob = prob
+        self.params = params
         self.horizon = self.prob.horizon
 
-        self.nB = self.prob.states[0].shape[0]
-        nx = self.prob.nx
-        nu = self.prob.nu
-
-        self.admm_solver = Admm(prob, qp_solver)
+        # self.admm_solver = Admm(self.prob, qp_solver)
+        self.qp_solver = None
+        if self.params.qp_solver == "lqr":
+            self.qp_solver = Lqr(prob)
 
         # Log best line search metrics
         self.best_cost, self.best_gamma, self.best_uact = self.calc_metrics(
@@ -30,55 +55,48 @@ class Sqp:
             self.prob.controls,
         )
 
-        self.terminated = torch.zeros((self.nB), dtype=torch.bool)
+        self.terminated = torch.zeros((self.params.n_B), dtype=torch.bool)
 
-        self.log = {
-            "nB": self.nB,
+        self.iter_log = {
+            "nB": self.params.n_B,
             "terminated": 0,
             "ssqp_iterations": 0,
             "t_solve_s": 0.0,
             "cuda_reserved_bytes": 0,
             "cuda_allocated_bytes": 0,
-            "t_qp_solve": [0.0] * self.max_iter,
-            "t_line_search": [0.0] * self.max_iter,
-            "line_search_iters": [0.0] * self.max_iter,
+            "t_qp_solve": [0.0] * self.params.max_iter,
+            "t_line_search": [0.0] * self.params.max_iter,
+            "line_search_iters": [0.0] * self.params.max_iter,
             "max_dyn_viol": 0.0,
             "max_uact_viol": 0.0,
         }
 
     def solve(self):
-        # Solve for max_iter steps
-
         print("####### SSQP Solver ########")
+        # Solve for max_iter steps
         t_solve_start = time.time()
-        for iter in range(self.max_iter):
+        for iter in range(self.params.max_iter):
+            # Get LQR corrections
+            # Perform ADMM step
+            start = time.time()
+            delta_x_qp, delta_u_qp, delta_pi_qp, delta_lam_qp = self.qp_solver.solve()
+            end = time.time()
+            t_qp_solve = end - start
+            self.iter_log["t_qp_solve"] = t_qp_solve
 
-            # Step solver
-            t_qp_solve, t_line_search, ls_iters, alpha, dones = self.step()
+            # Line search
+            start = time.time()
+            alpha, dones, ls_iters = self.line_search(delta_x_qp, delta_u_qp)
+            end = time.time()
+            t_line_search = end - start
+            self.iter_log["t_line_search"] = t_line_search
+            self.iter_log["line_search_iters"] = ls_iters
 
-            # cursor up one line
-            # delete last line
-            # if iter > 0:
-            #     sys.stdout.write("\x1b[1A")
-            #     sys.stdout.write("\x1b[2K")
-            #     sys.stdout.write("\x1b[1A")
-            #     sys.stdout.write("\x1b[2K")
-            # print("SSQP Iteration: ", iter + 1)
-            # print(
-            #     "Terminated Environments: ",
-            #     torch.count_nonzero(self.terminated).item(),
-            #     "/",
-            #     self.terminated.shape[0],
-            # )
-
-            self.log["t_qp_solve"][iter] = t_qp_solve
-            self.log["t_line_search"][iter] = t_line_search
-            self.log["line_search_iters"][iter] = ls_iters
-
-            # Check for terminations
+            # Check termination
+            self.check_termination(delta_x_qp, delta_u_qp)
             if torch.all(self.terminated):
+                t_solve_end = time.time()
                 break
-        t_solve_end = time.time()
         print("SSQP Total Iterations: ", iter + 1)
         print(
             "Terminated Environments: ",
@@ -86,36 +104,23 @@ class Sqp:
             "/",
             self.terminated.shape[0],
         )
-        print("Solution time: ", t_solve_end - t_solve_start)
 
         # Fill log
-        self.log["t_solve_s"] = t_solve_end - t_solve_start
-        self.log["ssqp_iterations"] = iter + 1
-        self.log["terminated"] = torch.count_nonzero(self.terminated).item()
+        self.iter_log["t_solve_s"] = t_solve_end - t_solve_start
+        self.iter_log["ssqp_iterations"] = iter + 1
+        self.iter_log["terminated"] = torch.count_nonzero(self.terminated).item()
         if torch.get_default_device() != "cpu":
-            self.log["cuda_reserved_bytes"] = torch.cuda.memory_reserved(0)
-            self.log["cuda_allocated_bytes"] = torch.cuda.memory_allocated(0)
-        return self.log
-
-    def step(self):
-        delta_x, delta_u, delta_pi, delta_lam, t_qp_solve = self.admm_solver.solve()
-
-        start = time.time()
-        alpha, dones, ls_iters = self.line_search(delta_x, delta_u)
-        end = time.time()
-        t_line_search = end - start
-
-        self.check_termination(delta_x, delta_u)
-
-        return t_qp_solve, t_line_search, ls_iters, alpha, dones
+            self.iter_log["cuda_reserved_bytes"] = torch.cuda.memory_reserved(0)
+            self.iter_log["cuda_allocated_bytes"] = torch.cuda.memory_allocated(0)
+        return self.iter_log
 
     def line_search(self, delta_x, delta_u, max_iter: float = 10):
-        alpha = torch.ones((self.nB, 1))
+        alpha = torch.ones((self.params.n_B, 1))
         dones = self.terminated.clone()
         i = 0
         while (not torch.all(dones)) and (i < max_iter):
             i += 1
-            gamma = torch.zeros((self.nB, 1))
+            gamma = torch.zeros((self.params.n_B, 1))
 
             # Evaluate current alpha
             x_cand, u_cand = self.calc_cadidate_solutions(
@@ -169,7 +174,7 @@ class Sqp:
         # max_Lx = torch.norm(Lx, p=float("inf"), dim=1)
         # max_Lu = torch.norm(Lx, p=float("inf"), dim=1)
 
-        max = torch.zeros(self.nB)
+        max = torch.zeros(self.params.n_B)
         for i in range(len(delta_u)):
             # cand = torch.max(torch.square(dx), dim=1).values
             dx = delta_x[i]
@@ -186,12 +191,12 @@ class Sqp:
             mm(dx.unsqueeze(2).transpose(1, 2), dx.unsqueeze(2)).squeeze(2), dim=1
         ).values
         max[res > max] = res[res > max]
-        dx_crit = max < self.eps_dx
+        dx_crit = max < 0.1
 
         ## Dynamics Violation ##
         # Track largest violation for each batch
-        max_dyn_viols = torch.zeros(self.nB)
-        max_uact_viols = torch.zeros(self.nB)
+        max_dyn_viols = torch.zeros(self.params.n_B)
+        max_uact_viols = torch.zeros(self.params.n_B)
         for k in range(self.horizon - 1):
             x0 = self.prob.states[k]
             u0 = self.prob.controls[k]
@@ -209,13 +214,15 @@ class Sqp:
                 index_mask = uact_inf_norm > max_uact_viols
                 max_uact_viols[index_mask] = uact_inf_norm[index_mask]
 
-        # terminate_Lx = max_Lx < self.eps
-        # terminate_Lu = max_Lu < self.eps
+        # terminate_Lx = max_Lx < self.params.eps
+        # terminate_Lu = max_Lu < self.params.eps
         # print("Max dyn viols: ", max_dyn_viols, ", ", max_uact_viols)
-        self.log["max_dyn_viol"] = torch.norm(max_dyn_viols, p=float("inf")).item()
-        self.log["max_uact_viol"] = torch.norm(max_uact_viols, p=float("inf")).item()
-        terminate_dyn_viols = max_dyn_viols < self.eps
-        terminate_uact_viols = max_uact_viols < self.eps
+        self.iter_log["max_dyn_viol"] = torch.norm(max_dyn_viols, p=float("inf")).item()
+        self.iter_log["max_uact_viol"] = torch.norm(
+            max_uact_viols, p=float("inf")
+        ).item()
+        terminate_dyn_viols = max_dyn_viols < self.params.eps
+        terminate_uact_viols = max_uact_viols < self.params.eps
 
         # self.terminated = torch.logical_or(terminate_Lx, terminate_Lu)
         self.terminated = torch.logical_and(terminate_dyn_viols, terminate_uact_viols)
@@ -231,9 +238,9 @@ class Sqp:
         return x_cand, u_cand
 
     def calc_metrics(self, x_cand, u_cand):
-        cost = torch.zeros((self.nB))
-        gamma = torch.zeros((self.nB))
-        uact = torch.zeros((self.nB))
+        cost = torch.zeros((self.params.n_B))
+        gamma = torch.zeros((self.params.n_B))
+        uact = torch.zeros((self.params.n_B))
         for k in range(self.horizon - 1):
             # Calculate total trajectory cost
             cost += self.prob.l(k, x_cand[k], u_cand[k])
@@ -265,8 +272,8 @@ class Sqp:
     # Calculate Lagrangian gradients
     def calc_Lx_Lu(self):
         dt = self.prob.dt
-        Lx = torch.zeros((self.nB, self.prob.nx))
-        Lu = torch.zeros((self.nB, self.prob.nu))
+        Lx = torch.zeros((self.params.n_B, self.prob.nx))
+        Lu = torch.zeros((self.params.n_B, self.prob.nu))
         for k in range(self.horizon - 1):
             x = self.prob.states[k]
             u = self.prob.controls[k]

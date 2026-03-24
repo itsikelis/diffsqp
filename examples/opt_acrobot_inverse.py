@@ -8,8 +8,7 @@ from diffsqp.dynamics import Dynamics
 from diffsqp.constraints import AcrobotUnderactuation
 from diffsqp.utils.animate import AcrobotAnimator
 from diffsqp.solvers import Lqr
-from diffsqp.solvers import Admm
-from diffsqp.solvers import Sqp
+from diffsqp.solvers import Sqp, SqpParams
 
 # torch.set_default_dtype(torch.double)
 # torch.set_default_device("cuda")
@@ -30,7 +29,7 @@ l2 = 0.5
 dt = 0.01
 tf = 1.0
 horizon = int(tf / dt)
-nB = 3
+n_B = 3
 nx = 4
 nu = 2
 
@@ -47,19 +46,19 @@ uact = AcrobotUnderactuation(
     I1=1 / (3.0 * 1.0 * 0.5**2),
 )
 
-x_init = torch.tensor([torch.pi, 0.0, 0.0, 0.0]).repeat(nB, 1)
-x_init[:, 0:2] += 0.2 * torch.randn((nB, 2))
-x_des = torch.tensor([torch.pi, 0.0, 0.0, 0.0]).repeat(nB, 1)
+x_init = torch.tensor([torch.pi, 0.0, 0.0, 0.0]).repeat(n_B, 1)
+x_init[:, 0:2] += 0.2 * torch.randn((n_B, 2))
+x_des = torch.tensor([torch.pi, 0.0, 0.0, 0.0]).repeat(n_B, 1)
 
-prob = Problem(horizon, dt, nB, nx, nu)
+prob = Problem(horizon, dt, n_B, nx, nu)
 
 q_w = torch.tensor([1e-6, 1e-6, 1e-6, 1e-6])
 r_w = torch.tensor([1e-1])
 qf_w = torch.tensor([4e8, 4e8, 1e5, 1e5])
 
-Q = q_w * torch.eye(nx).repeat(nB, 1, 1)
-R = r_w * torch.eye(nu).repeat(nB, 1, 1)
-Qf = qf_w * torch.eye(nx).repeat(nB, 1, 1)
+Q = q_w * torch.eye(nx).repeat(n_B, 1, 1)
+R = r_w * torch.eye(nu).repeat(n_B, 1, 1)
+Qf = qf_w * torch.eye(nx).repeat(n_B, 1, 1)
 
 # Set stage cost and constraints
 for i in range(horizon - 1):
@@ -73,8 +72,9 @@ prob.states[-1] = x_des.clone()
 prob.costs.append([LqrCost(Q=Qf, x_des=x_des.clone())])
 
 # Create solver object
-qp_solver = Lqr(prob)
-solver = Sqp(prob, qp_solver)
+# qp_solver = Lqr(prob)
+sqp_params = SqpParams(qp_solver="lqr", n_B=n_B, max_iter=500, eps=1e-4)
+solver = Sqp(prob, sqp_params)
 
 start = time.time()
 try:
@@ -89,7 +89,7 @@ import matplotlib.pyplot as plt
 
 
 def plot_states(states_list):
-    # 1. Stack the list of tensors into one tensor: (horizon, nB, n_x)
+    # 1. Stack the list of tensors into one tensor: (horizon, n_B, n_x)
     states_tensor = torch.stack(states_list)
 
     # 2. Extract the first batch (index 0) and convert to numpy
@@ -115,5 +115,5 @@ def plot_states(states_list):
 
 plot_states(prob.states)
 
-anim = AcrobotAnimator(np.array(prob.states), l1, l2, dt, nB)
+anim = AcrobotAnimator(np.array(prob.states), l1, l2, dt, n_B)
 anim.animate(step_size=2)
