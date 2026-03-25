@@ -4,7 +4,17 @@ from diffsqp.utils.math import mm, mv
 
 
 class LqrCost(Cost):
-    def __init__(self, Q, R=None, x_des=None, u_des=None):
+    ## Classic Linear Quadratic Regulator (LQR) cost function.
+    ##
+    ## (x - x_des)^T @ Q @ (x - x_des) + (u - u_des)^T @ R @ (u - u_des)
+    ##
+    def __init__(
+        self,
+        Q: torch.Tensor,
+        R: torch.Tensor = None,
+        x_des: torch.Tensor = None,
+        u_des: torch.Tensor = None,
+    ) -> None:
         self.nB = Q.shape[0]
         self.nx = Q.shape[1]
 
