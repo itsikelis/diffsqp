@@ -30,14 +30,14 @@ class Lqr:
         # Lagrange multipliers of the actuation part
         self.Dpi = [None] * (self.horizon - 1)
         # Lagrange multipliers of the underactuation part
-        self.Dlam = [None] * (self.horizon - 1)
+        self.Dni = [None] * (self.horizon - 1)
 
     def solve(self):
         self.backward_pass_()
         self.forward_pass_()
 
         # Return corrections
-        return self.Dx, self.Du, self.Dpi, self.Dlam
+        return self.Dx, self.Du, self.Dpi, self.Dni
 
     def backward_pass_(self):
         x_N = self.prob.states[self.horizon - 1]
@@ -104,7 +104,7 @@ class Lqr:
             B = self.B[i]
             b = self.b[i]
 
-            self.Dx[i + 1], self.Du[i], self.Dpi[i], self.Dlam[i] = (
+            self.Dx[i + 1], self.Du[i], self.Dpi[i], self.Dni[i] = (
                 self.riccati_forward_(
                     Dx0=Dx0, K=K, k=k, A=A, B=B, b=b, K_lam=K_lam, k_lam=k_lam, V=V, v=v
                 )
@@ -193,9 +193,9 @@ class Lqr:
         Du = mv(K, Dx0) + k
         Dx = mv(A, Dx0) + mv(B, Du) + b
         Dpi = mv(V, Dx) + v
-        Dlam = None
+        Dni = None
         if K_lam is not None:
-            Dlam = mv(K_lam, Dx0) + k_lam
+            Dni = mv(K_lam, Dx0) + k_lam
 
         # Sanity checks
         nB = self.nB
@@ -204,7 +204,7 @@ class Lqr:
         assert Dx.shape == torch.Size([nB, nx])
         assert Du.shape == torch.Size([nB, nu])
 
-        return Dx, Du, Dpi, Dlam
+        return Dx, Du, Dpi, Dni
 
     def calc_linearized_cost_terms_(self, stage_idx, x_lin, u_lin):
         Q = self.prob.lxx(stage_idx, x_lin, u_lin)
