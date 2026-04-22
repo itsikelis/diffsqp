@@ -20,8 +20,8 @@ class Lqr:
         self.P = [None] * self.horizon
         self.p = [None] * self.horizon
 
-        self.Dx = [None] * self.horizon
-        self.Du = [None] * (self.horizon - 1)
+        self.delta_x = [None] * self.horizon
+        self.delta_u = [None] * (self.horizon - 1)
         # Lagrange multipliers of the actuation part
         self.mu = [None] * (self.horizon)
         # Lagrange multipliers of the underactuation part
@@ -32,7 +32,7 @@ class Lqr:
         self.forward_pass_()
 
         # Return results
-        return self.Dx, self.Du, self.mu, self.nu
+        return self.delta_x, self.delta_u, self.mu, self.nu
 
     def backward_pass_(self):
         x_N = self.prob.states[self.horizon - 1]
@@ -47,7 +47,6 @@ class Lqr:
             self.A[i], self.B[i], self.b[i] = self.calc_linearized_dynamics_terms_(
                 x_lin, u_lin, x_next, self.prob.dynamics[i]
             )
-
             C, D, e = self.calc_linearized_constraint_terms_(i, x_lin, u_lin, x_next)
 
             (
@@ -74,16 +73,21 @@ class Lqr:
     def forward_pass_(self):
         # TODO: Add initial state optimization as an option
         nx = self.prob.nx
-        self.Dx[0] = torch.zeros([self.nB, nx])
+        self.delta_x[0] = torch.zeros([self.nB, nx])
         for i in range(self.horizon - 1):
             x_lin = self.prob.states[i]
             u_lin = self.prob.controls[i]
             x_next = self.prob.states[i + 1]
 
-            Dx0 = self.Dx[i]
+            delta_x0 = self.delta_x[i]
 
-            self.Dx[i + 1], self.Du[i], self.mu[i + 1], self.nu[i] = self.step_forward_(
-                x=Dx0,
+            (
+                self.delta_x[i + 1],
+                self.delta_u[i],
+                self.mu[i + 1],
+                self.nu[i],
+            ) = self.step_forward_(
+                x=delta_x0,
                 K=self.K[i],
                 k=self.k[i],
                 P_next=self.P[i + 1],
@@ -104,8 +108,8 @@ class Lqr:
 
         # cache term to reuse in the calculations
         l = mv(P_next, b) + p_next
-        # l = mv(P_next, b) + p_next
 
+        ## TODO: Optimize these with einsum for quadratics
         Q_ = Q + mm(AT, mm(P_next, A))
         q_ = q + mv(AT, l)
         R_ = R + mm(BT, mm(P_next, B))
@@ -162,8 +166,8 @@ class Lqr:
         # nB = self.nB
         # nx = self.prob.nx
         # nu = self.prob.nu
-        # assert Dx.shape == torch.Size([nB, nx])
-        # assert Du.shape == torch.Size([nB, nu])
+        # assert delta_x.shape == torch.Size([nB, nx])
+        # assert delta_u.shape == torch.Size([nB, nu])
 
         return x_next, u, pi, nu
 
