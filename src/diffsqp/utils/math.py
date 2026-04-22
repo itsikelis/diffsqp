@@ -2,14 +2,17 @@ import torch
 
 
 def mm(A, B):
-    if len(A.shape) == 2:
-        return A @ B
-    else:
-        return torch.bmm(A, B)
+    return torch.einsum("...ij,...jk->...ik", A, B)
 
 
 def mv(A, b):
-    if len(A.shape) == 2:
-        return (A @ b.unsqueeze(2)).squeeze(2)
-    else:
-        return torch.bmm(A, b.unsqueeze(2)).squeeze(2)
+    # return (A @ b.unsqueeze(2)).squeeze(2)
+    return torch.einsum("...ij,...jk->...i", A, b.unsqueeze(2))
+
+
+def tran(A):
+    return torch.einsum("...ij->...ji", A)
+
+
+def inf_norm(A):
+    return torch.norm(A, p=float("inf"), dim=-1)
