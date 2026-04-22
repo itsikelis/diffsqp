@@ -15,9 +15,9 @@ from diffsqp.utils.animate import CartPoleAnimator
 dyn = CartPoleDynamics(mc=0.5, mp=0.3, lp=0.2, grav=9.81)
 
 dt = 0.01
-tf = 1.00
+tf = 1.0
 horizon = int(tf / dt)
-n_B = 1
+n_B = 2
 nx = dyn.nx
 nu = dyn.nu
 
@@ -55,7 +55,7 @@ prob.states[-1] = x_des.clone()
 prob.costs.append([LqrCost(Q=Qf, x_des=x_des.clone())])
 
 # Create solver object
-sqp_params = SqpParams(qp_solver="qp", n_B=n_B, max_iter=500, eps=1e-4)
+sqp_params = SqpParams(qp_solver="lqr", n_B=n_B, max_iter=500, eps=1e-4)
 solver = Sqp(prob, sqp_params)
 
 start = time.time()

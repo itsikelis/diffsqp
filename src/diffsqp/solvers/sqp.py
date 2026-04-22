@@ -1,7 +1,7 @@
 import sys
 import time
 import torch
-from diffsqp.utils.math import mm, mv
+from diffsqp.utils.math import mm, mv, inf_norm
 from typing import List
 
 from diffsqp.problems import Problem
@@ -22,14 +22,8 @@ class SqpIterationLog:
     # QP stuff
     qp_delta_x: List[torch.Tensor]
     qp_delta_u: List[torch.Tensor]
-    qp_delta_pi: List[torch.Tensor]
+    qp_pi: List[torch.Tensor]
     qp_delta_nu: List[torch.Tensor]
-
-    # ADMM stuff
-    admm_delta_x: List[torch.Tensor]
-    admm_delta_u: List[torch.Tensor]
-    admm_delta_pi: List[torch.Tensor]
-    admm_delta_nu: List[torch.Tensor]
 
     # Logging
     sqp_iterations: int
@@ -72,29 +66,29 @@ class Sqp:
         }
 
     def solve(self):
-        print("####### SSQP Solver ########")
         # Solve for max_iter steps
         t_solve_start = time.time()
         for iter in range(self.params.max_iter):
             # Get LQR corrections
             # Perform ADMM step
             start = time.time()
-            delta_x_qp, delta_u_qp, delta_pi_qp, delta_lam_qp = self.qp_solver.solve()
+            delta_x_qp, delta_u_qp, pi_qp, ni_qp = self.qp_solver.solve()
             end = time.time()
             t_qp_solve = end - start
             self.iter_log["t_qp_solve"] = t_qp_solve
 
             # Line search
             start = time.time()
-            alpha, dones, ls_iters = self.line_search(delta_x_qp, delta_u_qp)
+            alpha, dones, ls_iters = self.line_search(
+                delta_x_qp, delta_u_qp, pi_qp, ni_qp
+            )
             end = time.time()
             t_line_search = end - start
             self.iter_log["t_line_search"] = t_line_search
             self.iter_log["line_search_iters"] = ls_iters
 
             # Check termination
-            self.check_termination(delta_x_qp, delta_u_qp)
-            if torch.all(self.terminated):
+            if self.check_termination(delta_x_qp, delta_u_qp):
                 t_solve_end = time.time()
                 break
         print("SSQP Total Iterations: ", iter + 1)
@@ -114,7 +108,7 @@ class Sqp:
             self.iter_log["cuda_allocated_bytes"] = torch.cuda.memory_allocated(0)
         return self.iter_log
 
-    def line_search(self, delta_x, delta_u, max_iter: float = 10):
+    def line_search(self, delta_x, delta_u, pi, ni, max_iter: float = 10):
         alpha = torch.ones((self.params.n_B, 1))
         dones = self.terminated.clone()
         i = 0
@@ -151,6 +145,8 @@ class Sqp:
                 for k in range(self.horizon - 1):
                     self.prob.states[k][update_mask] = x_cand[k][update_mask]
                     self.prob.controls[k][update_mask] = u_cand[k][update_mask]
+                    self.prob.pi[k + 1][update_mask] = pi[k + 1][update_mask]
+                    # self.prob.ni[k][update_mask] = ni[k][update_mask]
                 self.prob.states[-1][update_mask] = x_cand[-1][update_mask]
                 # Mark environments as finished
                 dones[update_mask] = True
@@ -210,7 +206,7 @@ class Sqp:
 
             if self.prob.constraints[k]:
                 uact_viol = self.calc_underactuation_violation(k, x0, u0)
-                uact_inf_norm = torch.norm(uact_viol, p=float("inf"), dim=1)
+                uact_inf_norm = inf_norm(uact_viol)
                 index_mask = uact_inf_norm > max_uact_viols
                 max_uact_viols[index_mask] = uact_inf_norm[index_mask]
 
@@ -251,14 +247,14 @@ class Sqp:
                 x_cand[k],
                 u_cand[k],
             )
-            gamma += torch.norm(dyn_viol, p=float("inf"), dim=1)
+            gamma += inf_norm(dyn_viol)
             if self.prob.constraints[k]:
                 uact_viol = self.calc_underactuation_violation(
                     k,
                     x_cand[k],
                     u_cand[k],
                 )
-                uact += torch.norm(uact_viol, p=float("inf"), dim=1)
+                uact += inf_norm(uact_viol)
         # Add final node cost
         cost += self.prob.l(-1, x_cand[-1])
         return cost, gamma, uact
@@ -277,8 +273,8 @@ class Sqp:
         for k in range(self.horizon - 1):
             x = self.prob.states[k]
             u = self.prob.controls[k]
-            pi = self.pi[k]
-            lam = self.lam[k]
+            pi_0 = self.prob.pi[k]
+            pi_1 = self.prob.pi[k + 1]
             lx = self.prob.lx
             lu = self.prob.lu
             fx = self.prob.dynamics[k].fx

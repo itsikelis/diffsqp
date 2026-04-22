@@ -1,7 +1,7 @@
 import torch
 
 from diffsqp.problems import Problem
-from diffsqp.utils.math import mm, mv
+from diffsqp.utils.math import mm, mv, tran
 
 
 class Lqr:
@@ -9,8 +9,6 @@ class Lqr:
         self.prob = prob
         self.horizon = self.prob.horizon
         self.nB = self.prob.states[0].shape[0]
-        self.nx = self.prob.nx
-        self.nu = self.prob.nu
 
         self.A = [None] * (self.horizon - 1)
         self.B = [None] * (self.horizon - 1)
@@ -19,29 +17,27 @@ class Lqr:
         self.K = [None] * (self.horizon - 1)
         self.k = [None] * (self.horizon - 1)
 
-        self.K_lam = [None] * (self.horizon - 1)
-        self.k_lam = [None] * (self.horizon - 1)
-
-        self.V = [None] * self.horizon
-        self.v = [None] * self.horizon
+        self.P = [None] * self.horizon
+        self.p = [None] * self.horizon
 
         self.Dx = [None] * self.horizon
         self.Du = [None] * (self.horizon - 1)
         # Lagrange multipliers of the actuation part
-        self.Dpi = [None] * (self.horizon - 1)
+        self.mu = [None] * (self.horizon)
         # Lagrange multipliers of the underactuation part
-        self.Dni = [None] * (self.horizon - 1)
+        self.nu = [None] * (self.horizon - 1)
 
     def solve(self):
         self.backward_pass_()
         self.forward_pass_()
 
-        # Return corrections
-        return self.Dx, self.Du, self.Dpi, self.Dni
+        # Return results
+        return self.Dx, self.Du, self.mu, self.nu
 
     def backward_pass_(self):
         x_N = self.prob.states[self.horizon - 1]
-        self.V[-1], self.v[-1] = self.calc_final_cost_terms_(x_N)
+        self.P[-1], self.p[-1] = self.calc_final_cost_terms_(x_N)
+
         for i in range(self.horizon - 2, -1, -1):
             x_lin = self.prob.states[i]
             u_lin = self.prob.controls[i]
@@ -52,35 +48,27 @@ class Lqr:
                 x_lin, u_lin, x_next, self.prob.dynamics[i]
             )
 
-            C = None
-            D = None
-            e = None
-            if self.prob.constraints[i]:
-                C, D, e = self.calc_linearized_constraint_terms_(
-                    i, x_lin, u_lin, x_next
-                )
+            C, D, e = self.calc_linearized_constraint_terms_(i, x_lin, u_lin, x_next)
 
             (
                 self.K[i],
                 self.k[i],
-                self.V[i],
-                self.v[i],
-                self.K_lam[i],
-                self.k_lam[i],
-            ) = self.riccati_backward_(
+                self.P[i],
+                self.p[i],
+            ) = self.step_backward_(
                 Q=Q,
                 q=q,
                 R=R,
                 r=r,
                 S=S,
-                V=self.V[i + 1],
-                v=self.v[i + 1],
+                P_next=self.P[i + 1],
+                p_next=self.p[i + 1],
                 A=self.A[i],
                 B=self.B[i],
                 b=self.b[i],
                 C=C,
                 D=D,
-                e=e,
+                d=e,
             )
 
     def forward_pass_(self):
@@ -93,118 +81,91 @@ class Lqr:
             x_next = self.prob.states[i + 1]
 
             Dx0 = self.Dx[i]
-            K = self.K[i]
-            k = self.k[i]
-            K_lam = self.K_lam[i]
-            k_lam = self.k_lam[i]
-            V = self.V[i + 1]
-            v = self.v[i + 1]
 
-            A = self.A[i]
-            B = self.B[i]
-            b = self.b[i]
-
-            self.Dx[i + 1], self.Du[i], self.Dpi[i], self.Dni[i] = (
-                self.riccati_forward_(
-                    Dx0=Dx0, K=K, k=k, A=A, B=B, b=b, K_lam=K_lam, k_lam=k_lam, V=V, v=v
-                )
+            self.Dx[i + 1], self.Du[i], self.mu[i + 1], self.nu[i] = self.step_forward_(
+                x=Dx0,
+                K=self.K[i],
+                k=self.k[i],
+                P_next=self.P[i + 1],
+                p_next=self.p[i + 1],
+                A=self.A[i],
+                B=self.B[i],
+                b=self.b[i],
             )
 
-            # print("Cx + Du + e = ", (mv(C, self.Dx[i]) + mv(D, self.Du[i]) + e)[0, 0])
+    def step_backward_(
+        self, Q, q, R, r, S, P_next, p_next, A, B, b, C=None, D=None, d=None
+    ):
+        # Create Q_, q_, R_, r_, S_
+        # Pre-transpose matrices
+        AT = tran(A)
+        BT = tran(B)
+        ST = tran(S)
 
-    def riccati_backward_(self, Q, q, R, r, S, V, v, A, B, b, C, D, e):
-        nB = Q.shape[0]
-        nx = Q.shape[1]
-        nu = R.shape[2]
-        ng = None if D is None else D.shape[1]  # n of equality constraints
+        # cache term to reuse in the calculations
+        l = mv(P_next, b) + p_next
+        # l = mv(P_next, b) + p_next
 
-        AT = torch.transpose(A, 1, 2)
-        BT = torch.transpose(B, 1, 2)
-        ST = torch.transpose(S, 1, 2)
-
-        Q_ = Q + mm(AT, mm(V, A))
-        l = mv(V, b) + v
+        Q_ = Q + mm(AT, mm(P_next, A))
         q_ = q + mv(AT, l)
-        R_ = R + mm(BT, mm(V, B))
+        R_ = R + mm(BT, mm(P_next, B))
         r_ = r + mv(BT, l)
-        S_ = S + mm(BT, mm(V, A))
+        S_ = S + mm(BT, mm(P_next, A))
 
-        S_T = S_.transpose(1, 2)
+        if C is not None:
+            n_u = R_.shape[-2]
+            n_g = D.shape[-2]
+            dim = n_u + n_g
 
-        K_ = None
-        k_ = None
-        K_lam = None
-        k_lam = None
-        V_ = None
-        v_ = None
-        if C is None:
-            K_ = torch.linalg.solve(R_, -S_)
-            k_ = torch.linalg.solve(R_, -r_)
-            V_ = Q_ + mm(S_T, K_)
-            v_ = q_ + mv(S_T, k_)
-        else:
-            S_ext = torch.cat([S_, C], dim=1)
-            r_ext = torch.cat([r_, e], dim=1)
-            S_extT = S_ext.transpose(1, 2)
+            R_ext = torch.zeros((*R_.shape[:-2], dim, dim))
+            R_ext[..., :n_u, :n_u] = R_
+            R_ext[..., n_u:, :n_u] = D
+            R_ext[..., :n_u, n_u:] = D.transpose(-2, -1)
+            R_ = R_ext
 
-            dim = R_.shape[1] + D.shape[1]
-            R_ext = torch.zeros((nB, dim, dim))
-            R_ext[:, 0:nu, 0:nu] = R_
-            R_ext[:, nu:, 0:nu] = D
-            R_ext[:, 0:nu, nu:] = torch.transpose(D, 1, 2)
+            r_ = torch.cat([r_, d], dim=-1)
 
-            K_ext = torch.linalg.solve(R_ext, -S_ext)
-            k_ext = torch.linalg.solve(R_ext, -r_ext)
-            # Sanity check
-            nB = self.nB
-            nx = self.prob.nx
-            nu = self.prob.nu
-            assert K_ext.shape == torch.Size([nB, nu + ng, nx])
-            assert k_ext.shape == torch.Size([nB, nu + ng])
+            S_ = torch.cat([S_, C], dim=-2)
+        S_T = tran(S_)
 
-            K_ = K_ext[:, 0:nu, :]
-            k_ = k_ext[:, 0:nu]
+        # Assert shapes of R_, S_, Q_, q_
+        # nB = R.shape[:-2]
+        # nx = A.shape[-2]
+        # nu = B.shape[-1]
+        # ng = D.shape[-2]
+        # assert Q_.shape == torch.Size([*nB, nx, nx])
+        # assert q_.shape == torch.Size([*nB, nx])
+        # assert R_.shape == torch.Size([*nB, nu + ng, nu + ng])
+        # assert r_.shape == torch.Size([*nB, nu + ng])
 
-            K_lam = K_ext[:, nu:, :]
-            k_lam = k_ext[:, nu:]
+        # Compute K, k
+        K = torch.linalg.solve(R_, -S_)
+        k = torch.linalg.solve(R_, -r_)
 
-            V_ = Q_ + mm(S_extT, K_ext)
-            v_ = q_ + mv(S_extT, k_ext)
+        # Compute P, p
+        P = Q_ + mm(S_T, K)
+        p = q_ + mv(S_T, k)
 
-        # Sanity checks
-        nB = self.nB
-        nx = self.prob.nx
-        nu = self.prob.nu
-        assert Q_.shape == torch.Size([nB, nx, nx])
-        assert q_.shape == torch.Size([nB, nx])
-        assert R_.shape == torch.Size([nB, nu, nu])
-        assert r_.shape == torch.Size([nB, nu])
-        assert K_.shape == torch.Size([nB, nu, nx])
-        assert k_.shape == torch.Size([nB, nu])
-        assert V_.shape == torch.Size([nB, nx, nx])
-        assert v_.shape == torch.Size([nB, nx])
-        if K_lam is not None:
-            assert K_lam.shape == torch.Size([nB, ng, nx])
-            assert k_lam.shape == torch.Size([nB, ng])
+        return K, k, P, p
 
-        return K_, k_, V_, v_, K_lam, k_lam
+    def step_forward_(self, x, K, k, P_next, p_next, A, B, b):
+        n_u = B.shape[-1]
+        u_ = mv(K, x) + k
+        u = u_[..., :n_u]
+        nu = u_[..., n_u:]
 
-    def riccati_forward_(self, Dx0, K, k, A, B, b, K_lam, k_lam, V, v):
-        Du = mv(K, Dx0) + k
-        Dx = mv(A, Dx0) + mv(B, Du) + b
-        Dpi = mv(V, Dx) + v
-        Dni = None
-        if K_lam is not None:
-            Dni = mv(K_lam, Dx0) + k_lam
+        x_next = mv(A, x) + mv(B, u) + b
+
+        pi = mv(P_next, x_next) + p_next
 
         # Sanity checks
-        nB = self.nB
-        nx = self.prob.nx
-        nu = self.prob.nu
-        assert Dx.shape == torch.Size([nB, nx])
-        assert Du.shape == torch.Size([nB, nu])
+        # nB = self.nB
+        # nx = self.prob.nx
+        # nu = self.prob.nu
+        # assert Dx.shape == torch.Size([nB, nx])
+        # assert Du.shape == torch.Size([nB, nu])
 
-        return Dx, Du, Dpi, Dni
+        return x_next, u, pi, nu
 
     def calc_linearized_cost_terms_(self, stage_idx, x_lin, u_lin):
         Q = self.prob.lxx(stage_idx, x_lin, u_lin)
@@ -222,12 +183,15 @@ class Lqr:
         return A, B, b
 
     def calc_linearized_constraint_terms_(self, stage_idx, x_lin, u_lin, x_next):
+        if not self.prob.constraints[stage_idx]:
+            return None, None, None
+
         C = self.prob.gx(stage_idx, x_lin, u_lin)
         D = self.prob.gu(stage_idx, x_lin, u_lin)
         e = self.prob.g(stage_idx, x_lin, u_lin)
         return C, D, e
 
     def calc_final_cost_terms_(self, x_N):
-        V = self.prob.lxx(-1, x_N)
-        v = self.prob.lx(-1, x_N)
-        return V, v
+        P = self.prob.lxx(-1, x_N)
+        p = self.prob.lx(-1, x_N)
+        return P, p
