@@ -12,6 +12,7 @@ from dataclasses import dataclass
 @dataclass
 class SqpParams:
     qp_solver: str
+    ls_technique: str
     n_B: int
     max_iter: int
     eps: float
@@ -52,11 +53,16 @@ class Sqp:
         elif self.params.qp_solver == "qp":
             self.qp_solver = QP(prob)
 
-        # Log best line search metrics
-        self.best_cost, self.best_gamma, self.best_uact = self.calc_metrics(
-            self.prob.states,
-            self.prob.controls,
-        )
+        if self.params.ls_technique == "filter":
+            # Log best line search metrics
+            self.best_cost, self.best_gamma, self.best_uact = self.calc_metrics(
+                self.prob.states,
+                self.prob.controls,
+            )
+        elif self.params.ls_technique == "merit":
+            # Merit function
+            self.ls_mu = 1e6
+            self.best_phi = self.merit(self.prob.states, self.prob.controls)
 
         self.terminated = torch.zeros((self.params.n_B), dtype=torch.bool)
 
@@ -87,14 +93,10 @@ class Sqp:
             self.iter_log["t_qp_solve"] = t_qp_solve
 
             # Line search
-            start = time.time()
+            # TODO: Log ls time and total iters
             alpha, dones, ls_iters = self.line_search(
                 delta_x_qp, delta_u_qp, pi_qp, ni_qp
             )
-            end = time.time()
-            t_line_search = end - start
-            self.iter_log["t_line_search"] = t_line_search
-            self.iter_log["line_search_iters"] = ls_iters
 
             # Check termination
             if self.check_termination(delta_x_qp, delta_u_qp):
@@ -117,37 +119,11 @@ class Sqp:
             self.iter_log["cuda_allocated_bytes"] = torch.cuda.memory_allocated(0)
         return self.iter_log
 
-    # def merit_fn(self, x, u):
-    #     cost = torch.zeros((self.params.n_B))
-    #     gamma = torch.zeros((self.params.n_B))
-    #     uact = torch.zeros((self.params.n_B))
-    #     for k in range(self.horizon - 1):
-    #         # Calculate total trajectory cost
-    #         cost += self.prob.l(k, x_cand[k], u_cand[k])
-    #         # Calculate constraint violations
-    #         dyn_viol = self.calc_dynamics_violation(
-    #             self.prob.dynamics[k].f,
-    #             x_cand[k + 1],
-    #             x_cand[k],
-    #             u_cand[k],
-    #         )
-    #         gamma += inf_norm(dyn_viol)
-    #         if self.prob.constraints[k]:
-    #             uact_viol = self.calc_underactuation_violation(
-    #                 k,
-    #                 x_cand[k],
-    #                 u_cand[k],
-    #             )
-    #             uact += inf_norm(uact_viol)
-    #     # Add final node cost
-    #     cost += self.prob.l(-1, x_cand[-1])
-    #     pass
-    #
-    # # Given the QP solution, evaluate the best alpha to return vars = vars + alpha * qp_corrections
-    # def merit_line_search(self, delta_x, delta_u, mu, nu, max_iter: float = 10):
-    #     alpha = torch.ones((self.params.n_B, 1))
-    #
-    #     return new_x, new_u, new_mu, new_nu
+    def merit(self, x, u):
+        J, dyn, uact = self.calc_metrics(x, u)
+        # idx = uact > dyn
+        # dyn[idx] = uact[idx]
+        return J + self.ls_mu * dyn + self.ls_mu * uact
 
     def line_search(self, delta_x, delta_u, pi, ni, max_iter: float = 10):
         alpha = torch.ones((self.params.n_B, 1))
@@ -165,22 +141,22 @@ class Sqp:
                 delta_x,
                 delta_u,
             )
-            cost, gamma, uact = self.calc_metrics(x_cand, u_cand)
 
-            # Update successful environments
-            cost_improved = cost < self.best_cost
-            gamma_improved = gamma < self.best_gamma
-            uact_improved = uact < self.best_uact
-            # update_mask = (
-            #     cost_improved | gamma_improved | uact_improved
-            # ) & line_search_done
-            update_mask = (cost_improved | gamma_improved | uact_improved) & ~dones
-
-            # Merit Function
-            # merit = cost + self.beta * gamma + self.beta * uact
-            # merit_improved = merit < self.best_merit
-            # update_mask = merit_improved & ~dones
-            # print(merit_improved)
+            if self.params.ls_technique == "filter":
+                cost, gamma, uact = self.calc_metrics(x_cand, u_cand)
+                # Update successful environments
+                cost_improved = cost < self.best_cost
+                gamma_improved = gamma < self.best_gamma
+                uact_improved = uact < self.best_uact
+                # update_mask = (
+                #     cost_improved | gamma_improved | uact_improved
+                # ) & line_search_done
+                update_mask = (cost_improved | gamma_improved | uact_improved) & ~dones
+            elif self.params.ls_technique == "merit":
+                # Merit Function
+                phi = self.merit(x_cand, u_cand)
+                phi_improved = phi <= self.best_phi
+                update_mask = phi_improved & ~dones
 
             if update_mask.any():
                 for k in range(self.horizon - 1):
@@ -192,10 +168,16 @@ class Sqp:
                 # Mark environments as finished
                 dones[update_mask] = True
 
-            # Update best cost and gamma
-            self.best_cost[cost_improved & ~dones] = cost[cost_improved & ~dones]
-            self.best_gamma[gamma_improved & ~dones] = gamma[gamma_improved & ~dones]
-            self.best_uact[uact_improved & ~dones] = uact[uact_improved & ~dones]
+            if self.params.ls_technique == "filter":
+                # Update best cost and gamma
+                self.best_cost[cost_improved & ~dones] = cost[cost_improved & ~dones]
+                self.best_gamma[gamma_improved & ~dones] = gamma[
+                    gamma_improved & ~dones
+                ]
+                self.best_uact[uact_improved & ~dones] = uact[uact_improved & ~dones]
+            elif self.params.ls_technique == "merit":
+                # Update best merit
+                self.best_phi[phi_improved & ~dones] = phi[phi_improved & ~dones]
 
             # Update alpha for failed environments
             failed_mask = ~update_mask & ~dones
@@ -236,7 +218,7 @@ class Sqp:
             u0 = self.prob.controls[k]
             x1 = self.prob.states[k + 1]
             if self.prob.constraints[k]:
-                uact_viol = self.calc_underactuation_violation(k, x0, u0)
+                uact_viol = self.underactuation_violation(k, x0, u0)
                 uact_inf_norm = inf_norm(uact_viol)
                 index_mask = uact_inf_norm > max_uact_viols
                 max_uact_viols[index_mask] = uact_inf_norm[index_mask]
@@ -274,35 +256,51 @@ class Sqp:
         return x_cand, u_cand
 
     def calc_metrics(self, x_cand, u_cand):
-        cost = torch.zeros((self.params.n_B))
-        gamma = torch.zeros((self.params.n_B))
+        # Returns:
+        # J: total cost
+        # dyn: ||dynamics violation||_inf
+        # uact:  ||underactuation violation||_inf
+        J = torch.zeros((self.params.n_B))
+        dyn = torch.zeros((self.params.n_B))
         uact = torch.zeros((self.params.n_B))
         for k in range(self.horizon - 1):
             # Calculate total trajectory cost
-            cost += self.prob.l(k, x_cand[k], u_cand[k])
-            # Calculate constraint violations
-            dyn_viol = self.calc_dynamics_violation(
-                self.prob.dynamics[k].f,
-                x_cand[k + 1],
-                x_cand[k],
-                u_cand[k],
-            )
-            gamma += inf_norm(dyn_viol)
-            if self.prob.constraints[k]:
-                uact_viol = self.calc_underactuation_violation(
-                    k,
+            J += self.prob.l(k, x_cand[k], u_cand[k])
+
+            # Dynamics violations
+            dyn_cand = inf_norm(
+                self.stage_dynamics_violation(
+                    self.prob.dynamics[k].f,
+                    x_cand[k + 1],
                     x_cand[k],
                     u_cand[k],
                 )
-                uact += inf_norm(uact_viol)
-        # Add final node cost
-        cost += self.prob.l(-1, x_cand[-1])
-        return cost, gamma, uact
+            )
+            # Keep biggest violations of all envs across the horizon
+            idx = [dyn_cand > dyn]
+            dyn[tuple(idx)] = dyn_cand[tuple(idx)]
 
-    def calc_dynamics_violation(self, f, x_next, x, u):
+            # Underactuation violations
+            if self.prob.constraints[k]:
+                uact_cand = inf_norm(
+                    self.underactuation_violation(
+                        k,
+                        x_cand[k],
+                        u_cand[k],
+                    )
+                )
+                # Keep biggest violations of all envs across the horizon
+                idx = uact_cand > uact
+                uact[idx] = uact_cand[idx]
+
+        # Add final node cost
+        J += self.prob.l(-1, x_cand[-1])
+        return J, dyn, uact
+
+    def stage_dynamics_violation(self, f, x_next, x, u):
         return x_next - f(x, u, self.prob.dt)
 
-    def calc_underactuation_violation(self, stage_idx, x, u):
+    def underactuation_violation(self, stage_idx, x, u):
         return self.prob.g(stage_idx, x, u)
 
     # Calculate Lagrangian gradients

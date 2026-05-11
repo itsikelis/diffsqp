@@ -28,6 +28,7 @@ class Lqr:
         self.nu = [None] * (self.horizon - 1)
 
     def solve(self):
+        # TODO: Time these
         self.backward_pass_()
         self.forward_pass_()
 
