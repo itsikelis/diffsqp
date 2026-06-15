@@ -4,7 +4,7 @@ import torch
 
 from diffsqp.costs import Cost
 from diffsqp.dynamics import Dynamics
-from diffsqp.constraints import Constraint
+from diffsqp.constraints import UnderactuationConstraint, GenericConstraint
 
 from diffsqp.utils.math import mv
 
@@ -42,7 +42,8 @@ class Problem(ABC):
         nu (int): Dimension of the control vector.
         costs (List[List[Cost]]): A list of length `horizon`, where each element
             is a list of Cost objects active at that stage.
-        dynamics (List[Dynamics]): A list of dynamics models for each transition.
+        dynamics (Dynamics): The dynamics model.
+        underactuation (Constraints): The underactuation equality constraints.
         constraints (List[Constraints]): A list of constraint objects for each stage.
         states (List[torch.Tensor]): The current state trajectory [nB x nx].
         controls (List[torch.Tensor]): The current control trajectory [nB x nu].
@@ -67,8 +68,9 @@ class Problem(ABC):
         self.nu = params.nu
         self.n_batch = params.n_batch
         self.costs: List[List[Cost]] = []
-        self.dynamics: List[Dynamics] = []
-        self.constraints: List[Constraints] = [None] * self.horizon
+        self.dynamics: Dynamics = None
+        self.underactuation: UnderactuationConstraint = None
+        self.constraints: List[GenericConstraint] = [None] * self.horizon
         self.states: List[torch.Tensor] = [
             torch.zeros((self.n_batch, self.nx)) for _ in range(self.horizon)
         ]

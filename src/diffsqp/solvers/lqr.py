@@ -46,9 +46,9 @@ class Lqr:
 
             Q, R, S, q, r = self.calc_linearized_cost_terms_(i, x_lin, u_lin)
             self.A[i], self.B[i], self.b[i] = self.calc_linearized_dynamics_terms_(
-                x_lin, u_lin, x_next, self.prob.dynamics[i]
+                x_lin, u_lin, x_next, self.prob.dynamics
             )
-            C, D, e = self.calc_linearized_constraint_terms_(i, x_lin, u_lin, x_next)
+            C, D, e = self.calc_linearized_underactuation_terms_(x_lin, u_lin)
 
             (
                 self.K[i],
@@ -187,13 +187,13 @@ class Lqr:
         B = dynamics.fu(x_lin, u_lin, self.prob.dt)
         return A, B, b
 
-    def calc_linearized_constraint_terms_(self, stage_idx, x_lin, u_lin, x_next):
-        if not self.prob.constraints[stage_idx]:
+    def calc_linearized_underactuation_terms_(self, x_lin, u_lin):
+        if self.prob.underactuation is None:
             return None, None, None
 
-        C = self.prob.gx(stage_idx, x_lin, u_lin)
-        D = self.prob.gu(stage_idx, x_lin, u_lin)
-        e = self.prob.g(stage_idx, x_lin, u_lin)
+        C = self.prob.underactuation.hx(x_lin, u_lin)
+        D = self.prob.underactuation.hu(x_lin, u_lin)
+        e = self.prob.underactuation.h(x_lin, u_lin)
         return C, D, e
 
     def calc_final_cost_terms_(self, x_N):

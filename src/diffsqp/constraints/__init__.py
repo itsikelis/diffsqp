@@ -1,3 +1,4 @@
-from .base_constraint import Constraint
+from .generic_constraint import GenericConstraint
+from .underactuation_constraint import UnderactuationConstraint
 from .cartpole_underactuation import CartPoleUnderactuation
 from .acrobot_underactuation import AcrobotUnderactuation

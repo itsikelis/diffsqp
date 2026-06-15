@@ -1,10 +1,10 @@
 import torch
 from torch import sin, cos
 
-from diffsqp.constraints import Constraint
+from diffsqp.constraints import GenericConstraint
 
 
-class ControlEqualityConstraint(Constraint):
+class ControlEqualityConstraint(GenericConstraint):
     def __init__(
         self,
         nx,

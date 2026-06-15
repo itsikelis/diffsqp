@@ -79,12 +79,11 @@ prob.states[-1] = prob_params.x_init.clone()
 prob.costs.append([LqrCost(Q=Qf, x_des=prob_params.x_des.clone())])
 
 # Constraints
-for i in range(prob_params.horizon - 1):
-    if prob_params.inverse_dynamics:
-        prob.dynamics.append(dyn)
-        prob.constraints[i] = [uact]
-    else:
-        prob.dynamics.append(dyn)
+if prob_params.inverse_dynamics:
+    prob.dynamics = dyn
+    prob.underactuation = uact
+else:
+    prob.dynamics = dyn
 
 
 # Create solver and solve

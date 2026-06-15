@@ -130,10 +130,10 @@ class Sqp:
         return self.log
 
     def merit(self, x, u):
-        J, dyn, uact = self.calc_metrics(x, u)
+        cost, dyn_inf, uact_inf = self.calc_metrics(x, u)
         # idx = uact > dyn
         # dyn[idx] = uact[idx]
-        return J + self.ls_mu * dyn + self.ls_mu * uact
+        return cost + self.ls_mu * dyn_inf + self.ls_mu * uact_inf
 
     def line_search_(self, x, u, delta_x, delta_u, mu, nu):
         alpha = torch.ones((self.prob.n_batch, 1))
@@ -234,29 +234,21 @@ class Sqp:
         """
         ## Lagrangian Gradients ##
         Lx, Lu = self.calc_Lx_Lu()
-        # print(Lx)
 
         ## Constraint Violations ##
+        states = torch.stack(self.prob.states, dim=0)
+        controls = torch.stack(self.prob.controls, dim=0)
+
         # Dynamics
-        states_tensor = torch.stack(self.prob.states, dim=0)
-        controls_tensor = torch.stack(self.prob.controls, dim=0)
-        x_curr = states_tensor[:-1]
-        u_curr = controls_tensor[:]
-        x_next = states_tensor[1:]
-        f = self.prob.dynamics[0].f
-        all_dyn_viols = x_next - f(x_curr, u_curr, self.prob.dt)
+        dyn = self.dynamics_violation_(states[1:], states[:-1], controls[:])
+        dyn_inf = torch.norm(dyn, p=float("inf"), dim=[0, 2])
 
         # Underactuation
-        max_uact_viols = torch.zeros(self.prob.n_batch)
-        for k in range(self.horizon - 1):
-            x0 = self.prob.states[k]
-            u0 = self.prob.controls[k]
-            x1 = self.prob.states[k + 1]
-            if self.prob.constraints[k]:
-                uact_viol = self.underactuation_violation(k, x0, u0)
-                uact_inf_norm = inf_norm(uact_viol)
-                index_mask = uact_inf_norm > max_uact_viols
-                max_uact_viols[index_mask] = uact_inf_norm[index_mask]
+        if self.prob.underactuation is not None:
+            uact = self.underactuation_violation_(states[:-1], controls[:])
+            uact_inf = torch.norm(uact, p=float("inf"), dim=[0, 2])
+
+        convergence_error = torch.maximum(dyn_inf, uact_inf)
 
         # terminate_Lx = max_Lx < self.params.sqp_eps
         # terminate_Lu = max_Lu < self.params.sqp_eps
@@ -268,16 +260,12 @@ class Sqp:
 
         terminate_Lx = inf_norm(Lx) < self.params.sqp_eps
         terminate_Lu = inf_norm(Lu) < self.params.sqp_eps
-        terminate_dyn_viols = (
-            torch.norm(all_dyn_viols, p=float("inf"), dim=[0, 2]) < self.params.sqp_eps
-        )
-        terminate_uact_viols = max_uact_viols < self.params.sqp_eps
+        terminate_constraints = convergence_error < self.params.sqp_eps
         return torch.stack(
             [
                 # terminate_Lx,
                 # terminate_Lu,
-                terminate_dyn_viols,
-                terminate_uact_viols,
+                terminate_constraints
             ]
         ).all()
 
@@ -292,51 +280,40 @@ class Sqp:
 
     def calc_metrics(self, x_cand, u_cand):
         # Returns:
-        # J: total cost
-        # dyn: ||dynamics violation||_inf
-        # uact:  ||underactuation violation||_inf
-        J = torch.zeros((self.prob.n_batch))
-        dyn = torch.zeros((self.prob.n_batch))
-        uact = torch.zeros((self.prob.n_batch))
+        # cost: total cost
+        # dyn_inf: ||dynamics violation||_inf
+        # uact_inf:  ||underactuation violation||_inf
+
+        states = torch.stack(x_cand, dim=0)
+        controls = torch.stack(u_cand, dim=0)
+
+        cost = self.total_cost_(states, controls)
+        dyn = self.dynamics_violation_(states[1:], states[:-1], controls[:])
+        dyn_inf = torch.norm(dyn, p=float("inf"), dim=[0, 2])
+
+        if self.prob.underactuation is not None:
+            uact = self.underactuation_violation_(states[:-1], controls[:])
+            uact_inf = torch.norm(uact, p=float("inf"), dim=[0, 2])
+
+        return cost, dyn_inf, uact_inf
+
+    def total_cost_(self, x, u):
+        cost = torch.zeros((self.prob.n_batch))
         for k in range(self.horizon - 1):
             # Calculate total trajectory cost
-            J += self.prob.l(k, x_cand[k], u_cand[k])
-
-            # Dynamics violations
-            dyn_cand = inf_norm(
-                self.stage_dynamics_violation(
-                    self.prob.dynamics[k].f,
-                    x_cand[k + 1],
-                    x_cand[k],
-                    u_cand[k],
-                )
-            )
-            # Keep biggest violations of all envs across the horizon
-            idx = [dyn_cand > dyn]
-            dyn[tuple(idx)] = dyn_cand[tuple(idx)]
-
-            # Underactuation violations
-            if self.prob.constraints[k]:
-                uact_cand = inf_norm(
-                    self.underactuation_violation(
-                        k,
-                        x_cand[k],
-                        u_cand[k],
-                    )
-                )
-                # Keep biggest violations of all envs across the horizon
-                idx = uact_cand > uact
-                uact[idx] = uact_cand[idx]
-
+            cost += self.prob.l(k, x[k], u[k])
         # Add final node cost
-        J += self.prob.l(-1, x_cand[-1])
-        return J, dyn, uact
+        cost += self.prob.l(-1, x[-1])
 
-    def stage_dynamics_violation(self, f, x_next, x, u):
+        return cost
+
+    def dynamics_violation_(self, x_next, x, u):
+        f = self.prob.dynamics.f
         return x_next - f(x, u, self.prob.dt)
 
-    def underactuation_violation(self, stage_idx, x, u):
-        return self.prob.g(stage_idx, x, u)
+    def underactuation_violation_(self, x, u):
+        h = self.prob.underactuation.h
+        return h(x, u)
 
     # Calculate Lagrangian gradients
     def calc_Lx_Lu(self):
@@ -350,8 +327,8 @@ class Sqp:
             pi_1 = self.prob.pi[k + 1]
             lx = self.prob.lx
             lu = self.prob.lu
-            fx = self.prob.dynamics[k].fx
-            fu = self.prob.dynamics[k].fu
+            fx = self.prob.dynamics.fx
+            fu = self.prob.dynamics.fu
             Lx += lx(k, x, u)
             Lu += lu(k, x, u)
         # Add final node cost
