@@ -75,7 +75,7 @@ for i in range(prob.horizon - 1):
     prob.states[i] = prob_params.x_init.clone()
     prob.costs.append([LqrCost(Q=Q, R=R)])
 # Set terminal cost
-prob.states[-1] = prob_params.x_init.clone()
+prob.states[-1] = prob_params.x_des.clone()
 prob.costs.append([LqrCost(Q=Qf, x_des=prob_params.x_des.clone())])
 
 # Constraints
