@@ -94,16 +94,14 @@ class Sqp:
         elif self.params.qp_solver == "qp":
             self.qp_solver = QP(prob)
 
-        self.best_cost, self.best_dyn_inf, self.best_uact_inf = self.calc_metrics_(
+        self.best_cost, self.best_constr_inf = self.calc_metrics_(
             self.prob.states,
             self.prob.controls,
         )
         if self.params.ls_function == "merit":
             # Merit function
             self.merit_mu = self.params.merit_mu
-            self.best_phi = self.merit_(
-                self.best_cost, self.best_dyn_inf, self.best_uact_inf
-            )
+            self.best_phi = self.merit_(self.best_cost, self.best_constr_inf)
 
         self.terminated = torch.zeros((self.prob.n_batch), dtype=torch.bool)
 
@@ -154,11 +152,11 @@ class Sqp:
             x_, u_ = self.calc_cadidate_solutions_(alpha, x, u, delta_x, delta_u)
 
             # Evaluate current alpha
-            cost, dyn_inf, uact_inf = self.calc_metrics_(x_, u_)
+            cost, constr_inf = self.calc_metrics_(x_, u_)
             if self.params.ls_function == "filter":
-                update_mask = self.evaluate_filter_(cost, dyn_inf, uact_inf)
+                update_mask = self.evaluate_filter_(cost, constr_inf)
             elif self.params.ls_function == "merit":
-                phi = self.merit_(cost, dyn_inf, uact_inf)
+                phi = self.merit_(cost, constr_inf)
                 update_mask = self.evaluate_merit_(phi)
 
             update_mask = update_mask & ~dones
@@ -170,8 +168,7 @@ class Sqp:
 
             # Update best filter and merit candidates
             self.best_cost[update_mask] = cost[update_mask]
-            self.best_dyn_inf[update_mask] = dyn_inf[update_mask]
-            self.best_uact_inf[update_mask] = uact_inf[update_mask]
+            self.best_constr_inf[update_mask] = constr_inf[update_mask]
             if self.params.ls_function == "merit":
                 self.best_phi[update_mask] = phi[update_mask]
 
@@ -179,17 +176,17 @@ class Sqp:
             alpha[~dones] *= 0.5
         return iter, dones
 
-    def evaluate_filter_(self, cost, dyn_inf, uact_inf):
+    def evaluate_filter_(self, cost, constr_inf):
         cost_improved = cost < self.best_cost
-        dyn_inf_improved = dyn_inf < self.best_dyn_inf
-        uact_improved = uact_inf < self.best_uact_inf
-        return cost_improved | dyn_inf_improved | uact_improved
+        constr_inf_improved = constr_inf < self.best_constr_inf
+        return cost_improved | constr_inf_improved
 
     def evaluate_merit_(self, phi):
         return phi < self.best_phi
 
-    def merit_(self, cost, dyn_inf, uact_inf):
-        return cost + self.merit_mu * torch.maximum(dyn_inf, uact_inf)
+    def merit_(self, cost, constr_inf):
+        # print(cost, constr_inf)
+        return cost + self.merit_mu * constr_inf
 
     def update_variables_(self, update_mask, x_, u_, mu_, nu_):
         for k in range(self.horizon - 1):
@@ -254,8 +251,7 @@ class Sqp:
     def calc_metrics_(self, x_cand, u_cand):
         # Returns:
         # cost: total cost
-        # dyn_inf: ||dynamics violation||_inf
-        # uact_inf:  ||underactuation violation||_inf
+        # constr_inf: ||constr||_inf
 
         states = torch.stack(x_cand, dim=0)
         controls = torch.stack(u_cand, dim=0)
@@ -264,11 +260,12 @@ class Sqp:
         dyn = self.dynamics_violation_(states[1:], states[:-1], controls[:])
         dyn_inf = torch.norm(dyn, p=float("inf"), dim=[0, 2])
 
-        if self.prob.underactuation is not None:
+        if self.prob.underactuation is None:
+            return cost, dyn_inf
+        else:
             uact = self.underactuation_violation_(states[:-1], controls[:])
             uact_inf = torch.norm(uact, p=float("inf"), dim=[0, 2])
-
-        return cost, dyn_inf, uact_inf
+            return cost, torch.maximum(dyn_inf, uact_inf)
 
     def total_cost_(self, x, u):
         cost = torch.zeros((self.prob.n_batch))

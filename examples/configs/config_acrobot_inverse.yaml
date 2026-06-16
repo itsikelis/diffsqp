@@ -37,6 +37,7 @@ problem:
 solver:
   # Solver parameters
   sqp_max_iter: 500
+  merit_mu: 1.0
   ls_max_iter: 10
   sqp_eps: 1.0E-4
   qp_solver: "lqr"
