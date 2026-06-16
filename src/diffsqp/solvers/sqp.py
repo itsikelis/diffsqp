@@ -41,6 +41,7 @@ class SqpSolutionLog:
         self.sqp_iterations: int = 0
 
         self.termination_time_s: float = 0.0
+        self.ls_iters: List[float] = []
         self.ls_alphas: List[float] = []
 
         # GPU related
@@ -50,12 +51,13 @@ class SqpSolutionLog:
     def __str__(self) -> str:
         cuda_res_mb = self.cuda_reserved_bytes / (1024**2)
         cuda_alc_mb = self.cuda_allocated_bytes / (1024**2)
-        cost_str = ", ".join([f"{a:.4f}" for a in self.total_cost[-5:]])
+        cost_str = ", ".join([f"{a:.2e}" for a in self.total_cost[-5:]])
         if len(self.total_cost) > 5:
             cost_str = f"... {cost_str}"
-        conv_error_str = ", ".join([f"{a:.5f}" for a in self.convergence_error[-5:]])
+        conv_error_str = ", ".join([f"{a:.2e}" for a in self.convergence_error[-5:]])
         if len(self.convergence_error) > 5:
             conv_error_str = f"... {conv_error_str}"
+        iters_str = ", ".join([f"{a}" for a in self.ls_iters[:]])
         alphas_str = ", ".join([f"{a:.4f}" for a in self.ls_alphas[-5:]])
         if len(self.ls_alphas) > 5:
             alphas_str = f"... {alphas_str}"
@@ -67,7 +69,8 @@ class SqpSolutionLog:
             f"  Total Cost         : [{cost_str}]\n"
             f"  Conv. Error        : [{conv_error_str}]\n"
             f"  Solve Time         : {self.termination_time_s:.4f} s\n"
-            f"  Line Search Alphas : [{alphas_str}]\n"
+            f"  Line Search Iters  : [{iters_str}]\n"
+            # f"  Line Search Alphas : [{alphas_str}]\n"
             f"  CUDA Allocated     : {cuda_alc_mb:.2f} MB\n"
             f"  CUDA Reserved      :  {cuda_res_mb:.2f} MB\n"
             f"========================="
@@ -118,7 +121,7 @@ class Sqp:
 
             # Line search
             # TODO: Log line search time and total iters
-            ls_iters, done = self.line_search_(
+            ls_info = self.line_search_(
                 self.prob.states,
                 self.prob.controls,
                 delta_x_qp,
@@ -126,6 +129,8 @@ class Sqp:
                 pi_qp,
                 ni_qp,
             )
+
+            self.log.ls_iters.append(ls_info["iterations"])
 
             # Check termination
             self.terminated = self.check_termination_()
@@ -174,7 +179,7 @@ class Sqp:
 
             # Decrease alpha
             alpha[~dones] *= 0.5
-        return iter, dones
+        return {"iterations": iter, "alphas": alpha, "dones": dones}
 
     def evaluate_filter_(self, cost, constr_inf):
         cost_improved = cost < self.best_cost
