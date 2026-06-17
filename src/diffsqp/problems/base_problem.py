@@ -80,25 +80,94 @@ class Problem(ABC):
         self.mu: List[torch.Tensor] = [
             torch.zeros((self.n_batch, self.n_x)) for _ in range(self.horizon)
         ]
-        self.nu: List[torch.Tensor] = [None for _ in range(self.horizon - 1)]
+        self.nu: List[torch.Tensor] = [
+            torch.zeros((self.n_batch, self.n_u)) for _ in range(self.horizon - 1)
+        ]
+        self.lam: List[torch.Tensor] = [None for _ in range(self.horizon)]
+
+        # Initialize gradient tensors
+        self.Lx = torch.zeros(
+            (self.horizon, self.n_batch, self.n_x), device=self.states[0].device
+        )
+        self.Lu = torch.zeros(
+            (self.horizon - 1, self.n_batch, self.n_u), device=self.states[0].device
+        )
 
     # --- Lagrangian Calculation Methods ---
 
-    def L(self):
-        L = torch.zeros((self.n_batch))
+    def Lx_Lu(self):
+        """
+        Calculates the gradient of the Lagrangian with respect to states (x) and controls (u).
+
+        Returns:
+            Lx (torch.Tensor): Gradients w.r.t states for stages 0 to N. Dimensions: horizon x n_batch x nx
+            Lu (torch.Tensor): Gradients w.r.t controls for stages 0 to N-1. Dimensions: horizon-1 x n_batch x nx
+        """
+
+        # Intermediate stages (k = 0 to N-1)
         for k in range(self.horizon - 1):
-            x = self.states[k]
-            u = self.controls[k]
-            pi_0 = self.pi[k]
-            pi_1 = self.pi[k + 1]
-            L += (
-                self.l(k, x, u)
-                + mv(torch.transpose(self.dynamics[k].f(x, u), 1, 2), pi_1)
-                - pi_0
-            )
+            x_k = self.states[k]
+            u_k = self.controls[k]
+            mu_k = self.mu[k]
+            mu_next = self.mu[k + 1]
+
+            # --- 1a. Fetch Gradients & Jacobians ---
+            cx_k = self.lx(k, x_k, u_k)  # Cost gradient w.r.t x [n_batch, n_x]
+            cu_k = self.lu(k, x_k, u_k)  # Cost gradient w.r.t u [n_batch, n_u]
+
+            fx_k = self.dynamics.fx(
+                x_k, u_k, self.dt
+            )  # Dynamics Jacobian w.r.t x [n_batch, n_x, n_x]
+            fu_k = self.dynamics.fu(
+                x_k, u_k, self.dt
+            )  # Dynamics Jacobian w.r.t u [n_batch, n_x, n_u]
+
+            # Base Lagrangian Gradients (Cost + Dynamics)
+            Lx_k = cx_k + mv(fx_k.transpose(1, 2), mu_next) - mu_k
+            Lu_k = cu_k + mv(fu_k.transpose(1, 2), mu_next)
+
+            # Underactuation Constraint Terms
+            if self.underactuation is not None:
+                # Assuming you have a lambda multiplier list initialized elsewhere
+                nu_k = self.nu[k]
+                hx_k = self.underactuation.hx(
+                    x_k, u_k
+                )  # Underactuation Jacobian w.r.t x [n_batch, n_h, n_x]
+                hu_k = self.underactuation.hu(
+                    x_k, u_k
+                )  # Underactuation Jacobian w.r.t u [n_batch, n_h, n_u]
+
+                Lx_k += mv(hx_k.transpose(1, 2), nu_k)
+                Lu_k += mv(hu_k.transpose(1, 2), nu_k)
+
+            # Inequality Constraint Terms
+            if self.constraints[k] is not None:
+                lam_k = self.lam[k]
+                gx_k = self.gx(
+                    k, x_k, u_k
+                )  # Constraint Jacobian w.r.t x [n_batch, n_c, n_x]
+                gu_k = self.gu(
+                    k, x_k, u_k
+                )  # Constraint Jacobian w.r.t u [n_batch, n_c, n_u]
+
+                Lx_k += mv(gx_k.transpose(1, 2), lam_k)
+                Lu_k += mv(gu_k.transpose(1, 2), lam_k)
+
+            # Store computed gradients
+            self.Lx[k] = Lx_k
+            self.Lu[k] = Lu_k
+
+        # 2. Terminal stage (N)
         x_N = self.states[-1]
-        pi_N = self.pi[-1]
-        L += self.l(-1, x_N) - pi_N
+        mu_N = self.mu[-1]
+
+        cx_N = self.lx(-1, x_N)  # Terminal cost gradient w.r.t x [n_batch, n_x]
+
+        # TODO: Add terminal constraint support
+        self.Lx[-1] = cx_N - mu_N
+
+        self.Lx[0] = 0.0
+        return self.Lx, self.Lu
 
     # --- Cost Aggregation Methods ---
 

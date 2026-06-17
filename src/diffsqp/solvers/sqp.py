@@ -106,6 +106,10 @@ class Sqp:
             self.merit_mu = self.params.merit_mu
             self.best_phi = self.merit_(self.best_cost, self.best_constr_inf)
 
+        # Book-keeping of correction scales
+        self.prev_dx_inf: torch.Tensor = torch.zeros(self.prob.n_batch)
+        self.prev_du_inf: torch.Tensor = torch.zeros(self.prob.n_batch)
+
         self.terminated = torch.zeros((self.prob.n_batch), dtype=torch.bool)
 
         self.log = SqpSolutionLog()
@@ -117,7 +121,7 @@ class Sqp:
             # Get LQR corrections
             # TODO: Log QP solve time
             # Perform ADMM step
-            delta_x_qp, delta_u_qp, pi_qp, ni_qp = self.qp_solver.solve()
+            delta_x_qp, delta_u_qp, mu_qp, nu_qp = self.qp_solver.solve()
 
             # Line search
             # TODO: Log line search time and total iters
@@ -126,14 +130,17 @@ class Sqp:
                 self.prob.controls,
                 delta_x_qp,
                 delta_u_qp,
-                pi_qp,
-                ni_qp,
+                mu_qp,
+                nu_qp,
             )
+
+            if ls_info["iterations"] == self.params.ls_max_iter - 1:
+                print("Line search failed")
 
             self.log.ls_iters.append(ls_info["iterations"])
 
             # Check termination
-            self.terminated = self.check_termination_()
+            self.terminated = self.check_termination_(delta_x_qp, delta_u_qp)
             if self.terminated.all():
                 break
         t_solve_end = time.time()
@@ -198,24 +205,31 @@ class Sqp:
             self.prob.states[k][update_mask] = x_[k][update_mask]
             self.prob.controls[k][update_mask] = u_[k][update_mask]
             self.prob.mu[k + 1][update_mask] = mu_[k + 1][update_mask]
-            # self.prob.nu[k][update_mask] = nu_[k][update_mask]
+            if self.prob.underactuation is not None:
+                self.prob.nu[k][update_mask] = nu_[k][update_mask]
         self.prob.states[-1][update_mask] = x_[-1][update_mask]
 
     def normalize_hessians_(dones):
         pass
 
-    def check_termination_(self):
+    def check_termination_(self, delta_x, delta_u):
         """
         Check the KKT conditions:
-        - ||Lx||_inf < eps
-        - ||Lu||_inf < eps
+        - ||L||_inf < eps
         - ||dynamics(x, u) - x_next||_inf < eps
-        - ||g(x, u)||_inf < eps
+        - ||h(x, u)||_inf < eps
 
         ! : For the Lagrangian gradient, we only need to include the active constraints
         """
-        ## Lagrangian Gradients ##
-        # Lx, Lu = self.calc_Lx_Lu()
+        delta_xs = torch.stack(delta_x, dim=0).transpose(0, 1)
+        delta_us = torch.stack(delta_u, dim=0).transpose(0, 1)
+
+        ## Primal Feasibility ##
+        # Lx, Lu = self.prob.Lx_Lu()
+
+        # Computing Lx, Lu is expensive, so we check for stationarity in the QP corrections.
+        dot_delta_x = torch.einsum("bhi,bhi->bh", delta_xs, delta_xs)
+        dot_delta_u = torch.einsum("bhi,bhi->bh", delta_us, delta_us)
 
         ## Constraint Violations ##
         states = torch.stack(self.prob.states, dim=0)
@@ -235,14 +249,27 @@ class Sqp:
         else:
             convergence_error = dyn_inf
 
-        # terminate_Lx = inf_norm(Lx) < self.params.sqp_eps
-        # terminate_Lu = inf_norm(Lu) < self.params.sqp_eps
+        # Lx_inf = torch.norm(Lx, p=float("inf"), dim=[0, 2])
+        # Lu_inf = torch.norm(Lu, p=float("inf"), dim=[0, 2])
+        dx_inf = torch.norm(dot_delta_x, p=float("inf"), dim=[1])
+        du_inf = torch.norm(dot_delta_u, p=float("inf"), dim=[1])
+        terminate_Lx = (
+            torch.norm(torch.sub(dx_inf, self.prev_dx_inf)) < self.params.sqp_eps
+        )
+        terminate_Lu = (
+            torch.norm(torch.sub(du_inf, self.prev_du_inf)) < self.params.sqp_eps
+        )
+        self.prev_dx_inf = dx_inf
+        self.prev_du_inf = du_inf
         terminate_constraints = convergence_error < self.params.sqp_eps
 
         # Logging
         self.log.convergence_error = convergence_error
 
-        return terminate_constraints
+        return torch.logical_and(
+            terminate_Lx, torch.logical_and(terminate_Lu, terminate_constraints)
+        )
+        # return terminate_constraints
 
     def calc_cadidate_solutions_(self, alpha, x, u, delta_x, delta_u):
         x_ = []
