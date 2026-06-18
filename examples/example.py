@@ -72,10 +72,10 @@ R = prob_params.r_w * torch.eye(dyn.nu).repeat(prob_params.n_batch, 1, 1)
 Qf = prob_params.qf_w * torch.eye(dyn.nx).repeat(prob_params.n_batch, 1, 1)
 # Set stage initial guess and costs
 for i in range(prob.horizon - 1):
-    prob.states[i] = prob_params.x_init.clone()
+    prob.states[:, i] = prob_params.x_init.clone()
     prob.costs.append([LqrCost(Q=Q, R=R)])
 # Set terminal cost
-prob.states[-1] = prob_params.x_des.clone()
+prob.states[:, -1] = prob_params.x_des.clone()
 prob.costs.append([LqrCost(Q=Qf, x_des=prob_params.x_des.clone())])
 
 # Constraints
@@ -104,9 +104,8 @@ print("Time elapsed: ", end - start, " s.")
 import matplotlib.pyplot as plt
 
 
-def plot_states(states_list):
-    states_tensor = torch.stack(states_list)
-    first_batch = states_tensor[:, 0, :].detach().cpu().numpy()
+def plot_states(states_tensor):
+    first_batch = states_tensor[0, :, :].detach().cpu().numpy()
 
     horizon, n_x = first_batch.shape
     time = range(horizon)
@@ -124,9 +123,8 @@ def plot_states(states_list):
     plt.show()
 
 
-def plot_controls(controls_list):
-    states_tensor = torch.stack(controls_list)
-    first_batch = states_tensor[:, 0, :].detach().cpu().numpy()
+def plot_controls(controls_tensor):
+    first_batch = controls_tensor[0, :, :].detach().cpu().numpy()
 
     horizon, n_x = first_batch.shape
     time = range(horizon)
@@ -151,7 +149,7 @@ def plot_controls(controls_list):
 # Animate:
 if sys_params.name == "acrobot":
     anim = AcrobotAnimator(
-        np.array(prob.states),
+        prob.states,
         sys_params.l1,
         sys_params.l2,
         prob_params.dt,
@@ -159,7 +157,10 @@ if sys_params.name == "acrobot":
     )
 elif sys_params.name == "cartpole":
     anim = CartPoleAnimator(
-        np.array(prob.states), sys_params.lp, prob_params.dt, prob_params.n_batch
+        prob.states,
+        sys_params.lp,
+        prob_params.dt,
+        prob_params.n_batch,
     )
 
 anim.animate(step_size=2)

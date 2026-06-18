@@ -18,6 +18,8 @@ class ProblemParams:
         self.dt: float = args["dt"]
         self.n_x: int = len(args["q_w"])
         self.n_u: int = len(args["r_w"])
+        # Number of underactuated DoFs
+        self.n_h: int = args["n_h"]
         self.horizon = int(self.tf / self.dt)
         # # Initial and final states
         self.x_init = torch.tensor(args["x_init"]).repeat(self.n_batch, 1)
@@ -66,32 +68,23 @@ class Problem(ABC):
         self.dt = params.dt
         self.n_x = params.n_x
         self.n_u = params.n_u
+        self.n_h = params.n_h
         self.n_batch = params.n_batch
         self.costs: List[List[Cost]] = []
         self.dynamics: Dynamics = None
         self.underactuation: UnderactuationConstraint = None
         self.constraints: List[GenericConstraint] = [None] * self.horizon
-        self.states: List[torch.Tensor] = [
-            torch.zeros((self.n_batch, self.n_x)) for _ in range(self.horizon)
-        ]
-        self.controls: List[torch.Tensor] = [
-            torch.zeros((self.n_batch, self.n_u)) for _ in range(self.horizon - 1)
-        ]
-        self.mu: List[torch.Tensor] = [
-            torch.zeros((self.n_batch, self.n_x)) for _ in range(self.horizon)
-        ]
-        self.nu: List[torch.Tensor] = [
-            torch.zeros((self.n_batch, self.n_u)) for _ in range(self.horizon - 1)
-        ]
-        self.lam: List[torch.Tensor] = [None for _ in range(self.horizon)]
+        self.states: torch.Tensor = torch.zeros((self.n_batch, self.horizon, self.n_x))
+        self.controls: torch.Tensor = torch.zeros(
+            (self.n_batch, self.horizon - 1, self.n_u)
+        )
+        self.mu: torch.Tensor = torch.zeros((self.n_batch, self.horizon, self.n_x))
+        self.nu: torch.Tensor = torch.zeros((self.n_batch, self.horizon - 1, self.n_u))
+        self.lam: torch.Tensor = torch.zeros((self.n_batch, self.horizon, self.n_u))
 
         # Initialize gradient tensors
-        self.Lx = torch.zeros(
-            (self.horizon, self.n_batch, self.n_x), device=self.states[0].device
-        )
-        self.Lu = torch.zeros(
-            (self.horizon - 1, self.n_batch, self.n_u), device=self.states[0].device
-        )
+        self.Lx = torch.zeros((self.n_batch, self.horizon, self.n_x))
+        self.Lu = torch.zeros((self.n_batch, self.horizon - 1, self.n_u))
 
     # --- Lagrangian Calculation Methods ---
 
@@ -106,10 +99,10 @@ class Problem(ABC):
 
         # Intermediate stages (k = 0 to N-1)
         for k in range(self.horizon - 1):
-            x_k = self.states[k]
-            u_k = self.controls[k]
-            mu_k = self.mu[k]
-            mu_next = self.mu[k + 1]
+            x_k = self.states[:, k]
+            u_k = self.controls[:, k]
+            mu_k = self.mu[:, k]
+            mu_next = self.mu[:, k + 1]
 
             # --- 1a. Fetch Gradients & Jacobians ---
             cx_k = self.lx(k, x_k, u_k)  # Cost gradient w.r.t x [n_batch, n_x]
@@ -158,8 +151,8 @@ class Problem(ABC):
             self.Lu[k] = Lu_k
 
         # 2. Terminal stage (N)
-        x_N = self.states[-1]
-        mu_N = self.mu[-1]
+        x_N = self.states[:, -1]
+        mu_N = self.mu[:, -1]
 
         cx_N = self.lx(-1, x_N)  # Terminal cost gradient w.r.t x [n_batch, n_x]
 

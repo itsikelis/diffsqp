@@ -8,7 +8,7 @@ class Lqr:
     def __init__(self, prob: Problem) -> None:
         self.prob = prob
         self.horizon = self.prob.horizon
-        self.nB = self.prob.states[0].shape[0]
+        self.nB = self.prob.states[:, 0].shape[0]
 
         self.A = [None] * (self.horizon - 1)
         self.B = [None] * (self.horizon - 1)
@@ -20,12 +20,12 @@ class Lqr:
         self.P = [None] * self.horizon
         self.p = [None] * self.horizon
 
-        self.delta_x = [None] * self.horizon
-        self.delta_u = [None] * (self.horizon - 1)
+        self.delta_x = torch.zeros((self.nB, self.horizon, self.prob.n_x))
+        self.delta_u = torch.zeros((self.nB, self.horizon - 1, self.prob.n_u))
         # Lagrange multipliers of the actuation part
-        self.mu = [None] * (self.horizon)
+        self.mu = torch.zeros((self.nB, self.horizon, self.prob.n_x))
         # Lagrange multipliers of the underactuation part
-        self.nu = [None] * (self.horizon - 1)
+        self.nu = torch.zeros((self.nB, self.horizon - 1, self.prob.n_h))
 
     def solve(self):
         # TODO: Time these
@@ -36,13 +36,13 @@ class Lqr:
         return self.delta_x, self.delta_u, self.mu, self.nu
 
     def backward_pass_(self):
-        x_N = self.prob.states[self.horizon - 1]
+        x_N = self.prob.states[:, self.horizon - 1]
         self.P[-1], self.p[-1] = self.calc_final_cost_terms_(x_N)
 
         for i in range(self.horizon - 2, -1, -1):
-            x_lin = self.prob.states[i]
-            u_lin = self.prob.controls[i]
-            x_next = self.prob.states[i + 1]
+            x_lin = self.prob.states[:, i]
+            u_lin = self.prob.controls[:, i]
+            x_next = self.prob.states[:, i + 1]
 
             Q, R, S, q, r = self.calc_linearized_cost_terms_(i, x_lin, u_lin)
             self.A[i], self.B[i], self.b[i] = self.calc_linearized_dynamics_terms_(
@@ -74,19 +74,19 @@ class Lqr:
     def forward_pass_(self):
         # TODO: Add initial state optimization as an option
         nx = self.prob.n_x
-        self.delta_x[0] = torch.zeros([self.nB, nx])
+        self.delta_x[:, 0] = torch.zeros([self.nB, nx])
         for i in range(self.horizon - 1):
-            x_lin = self.prob.states[i]
-            u_lin = self.prob.controls[i]
-            x_next = self.prob.states[i + 1]
+            x_lin = self.prob.states[:, i]
+            u_lin = self.prob.controls[:, i]
+            x_next = self.prob.states[:, i + 1]
 
-            delta_x0 = self.delta_x[i]
+            delta_x0 = self.delta_x[:, i]
 
             (
-                self.delta_x[i + 1],
-                self.delta_u[i],
-                self.mu[i + 1],
-                self.nu[i],
+                self.delta_x[:, i + 1],
+                self.delta_u[:, i],
+                self.mu[:, i + 1],
+                self.nu[:, i],
             ) = self.step_forward_(
                 x=delta_x0,
                 K=self.K[i],

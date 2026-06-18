@@ -6,7 +6,8 @@ import matplotlib.colors as mcolors
 
 class CartPoleAnimator:
     def __init__(self, states, lp, dt, nB):
-        self.states = states
+        self.states = states.detach().cpu().numpy().transpose(1, 0, 2)
+        # self.states = states
         self.lp = lp
         self.dt = dt
         self.nB = nB
@@ -119,7 +120,7 @@ class AcrobotAnimator:
         dt: Time step.
         nB: Number of parallel simulations to show.
         """
-        self.states = states
+        self.states = states.detach().cpu().numpy().transpose(1, 0, 2)
         self.l1 = l1
         self.l2 = l2
         self.dt = dt

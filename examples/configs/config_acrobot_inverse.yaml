@@ -19,13 +19,14 @@ system:
 
 problem:
   inverse_dynamics: True
+  n_h: 1 # Number of underactuated DoFs
   n_batch: 3 # batch size
   dt: 0.02 # node dt
   tf: 2.0 # total horizon time
 
   # Initial and final states
-  x_init: [0.0, 0.0, 0.0, 0.0]
-  # x_init: [3.14159, 0.0, 0.0, 0.0]
+  # x_init: [0.0, 0.0, 0.0, 0.0]
+  x_init: [3.14159, 0.0, 0.0, 0.0]
   x_des: [3.14159, 0.0, 0.0, 0.0]
   noise_std: 0.0 # initial state noise std
 

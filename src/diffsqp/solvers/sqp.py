@@ -202,12 +202,12 @@ class Sqp:
 
     def update_variables_(self, update_mask, x_, u_, mu_, nu_):
         for k in range(self.horizon - 1):
-            self.prob.states[k][update_mask] = x_[k][update_mask]
-            self.prob.controls[k][update_mask] = u_[k][update_mask]
-            self.prob.mu[k + 1][update_mask] = mu_[k + 1][update_mask]
+            self.prob.states[:, k][update_mask] = x_[:, k][update_mask]
+            self.prob.controls[:, k][update_mask] = u_[:, k][update_mask]
+            self.prob.mu[:, k + 1][update_mask] = mu_[:, k + 1][update_mask]
             if self.prob.underactuation is not None:
-                self.prob.nu[k][update_mask] = nu_[k][update_mask]
-        self.prob.states[-1][update_mask] = x_[-1][update_mask]
+                self.prob.nu[:, k][update_mask] = nu_[:, k][update_mask]
+        self.prob.states[:, -1][update_mask] = x_[:, -1][update_mask]
 
     def normalize_hessians_(dones):
         pass
@@ -221,28 +221,27 @@ class Sqp:
 
         ! : For the Lagrangian gradient, we only need to include the active constraints
         """
-        delta_xs = torch.stack(delta_x, dim=0).transpose(0, 1)
-        delta_us = torch.stack(delta_u, dim=0).transpose(0, 1)
 
         ## Primal Feasibility ##
-        # Lx, Lu = self.prob.Lx_Lu()
-
         # Computing Lx, Lu is expensive, so we check for stationarity in the QP corrections.
-        dot_delta_x = torch.einsum("bhi,bhi->bh", delta_xs, delta_xs)
-        dot_delta_u = torch.einsum("bhi,bhi->bh", delta_us, delta_us)
+
+        # Lx, Lu = self.prob.Lx_Lu()
+        dot_delta_x = torch.einsum("bhi,bhi->bh", delta_x, delta_x)
+        dot_delta_u = torch.einsum("bhi,bhi->bh", delta_u, delta_u)
 
         ## Constraint Violations ##
-        states = torch.stack(self.prob.states, dim=0)
-        controls = torch.stack(self.prob.controls, dim=0)
-
         # Dynamics
-        dyn = self.dynamics_violation_(states[1:], states[:-1], controls[:])
-        dyn_inf = torch.norm(dyn, p=float("inf"), dim=[0, 2])
+        dyn = self.dynamics_violation_(
+            self.prob.states[:, 1:], self.prob.states[:, :-1], self.prob.controls[:]
+        )
+        dyn_inf = torch.norm(dyn, p=float("inf"), dim=[1, 2])
 
         # Underactuation
         if self.prob.underactuation is not None:
-            uact = self.underactuation_violation_(states[:-1], controls[:])
-            uact_inf = torch.norm(uact, p=float("inf"), dim=[0, 2])
+            uact = self.underactuation_violation_(
+                self.prob.states[:, :-1], self.prob.controls[:]
+            )
+            uact_inf = torch.norm(uact, p=float("inf"), dim=[1, 2])
 
         if self.prob.underactuation is not None:
             convergence_error = torch.maximum(dyn_inf, uact_inf)
@@ -272,12 +271,13 @@ class Sqp:
         # return terminate_constraints
 
     def calc_cadidate_solutions_(self, alpha, x, u, delta_x, delta_u):
-        x_ = []
-        u_ = []
+        x_ = torch.zeros((self.prob.n_batch, self.horizon, self.prob.n_x))
+        u_ = torch.zeros((self.prob.n_batch, self.horizon - 1, self.prob.n_u))
+        # TODO: This is vectorizable
         for k in range(self.horizon):
-            x_.append(x[k] + torch.mul(alpha, delta_x[k]))
+            x_[:, k] = x[:, k] + torch.mul(alpha, delta_x[:, k])
             if k < self.horizon - 1:
-                u_.append(u[k] + torch.mul(alpha, delta_u[k]))
+                u_[:, k] = u[:, k] + torch.mul(alpha, delta_u[:, k])
         return x_, u_
 
     def calc_metrics_(self, x_cand, u_cand):
@@ -285,27 +285,27 @@ class Sqp:
         # cost: total cost
         # constr_inf: ||constr||_inf
 
-        states = torch.stack(x_cand, dim=0)
-        controls = torch.stack(u_cand, dim=0)
+        # states = torch.stack(x_cand, dim=0)
+        # controls = torch.stack(u_cand, dim=0)
 
-        cost = self.total_cost_(states, controls)
-        dyn = self.dynamics_violation_(states[1:], states[:-1], controls[:])
-        dyn_inf = torch.norm(dyn, p=float("inf"), dim=[0, 2])
+        cost = self.total_cost_(x_cand, u_cand)
+        dyn = self.dynamics_violation_(x_cand[:, 1:], x_cand[:, :-1], u_cand[:])
+        dyn_inf = torch.norm(dyn, p=float("inf"), dim=[1, 2])
 
         if self.prob.underactuation is None:
             return cost, dyn_inf
         else:
-            uact = self.underactuation_violation_(states[:-1], controls[:])
-            uact_inf = torch.norm(uact, p=float("inf"), dim=[0, 2])
+            uact = self.underactuation_violation_(x_cand[:, :-1], u_cand[:])
+            uact_inf = torch.norm(uact, p=float("inf"), dim=[1, 2])
             return cost, torch.maximum(dyn_inf, uact_inf)
 
     def total_cost_(self, x, u):
         cost = torch.zeros((self.prob.n_batch))
         for k in range(self.horizon - 1):
             # Calculate total trajectory cost
-            cost += self.prob.l(k, x[k], u[k])
+            cost += self.prob.l(k, x[:, k], u[:, k])
         # Add final node cost
-        cost += self.prob.l(-1, x[-1])
+        cost += self.prob.l(-1, x[:, -1])
 
         return cost
 
@@ -323,8 +323,8 @@ class Sqp:
         Lx = torch.zeros((self.prob.n_batch, self.prob.n_x))
         Lu = torch.zeros((self.prob.n_batch, self.prob.n_u))
         for k in range(self.horizon - 1):
-            x = self.prob.states[k]
-            u = self.prob.controls[k]
+            x = self.prob.states[:, k]
+            u = self.prob.controls[:, k]
             pi_0 = self.prob.pi[k]
             pi_1 = self.prob.pi[k + 1]
             lx = self.prob.lx
@@ -334,7 +334,7 @@ class Sqp:
             Lx += lx(k, x, u)
             Lu += lu(k, x, u)
         # Add final node cost
-        x_N = self.prob.states[-1]
+        x_N = self.prob.states[:, -1]
         Lx += self.prob.lx(-1, x_N)
 
         return Lx, Lu

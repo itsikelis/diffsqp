@@ -7,7 +7,7 @@ from diffsqp.dynamics import CartPoleParameters
 
 class CartPoleUnderactuation(UnderactuationConstraint):
     def __init__(self, params: CartPoleParameters):
-        super().__init__(ng=1, nx=4, nu=2)
+        super().__init__(n_h=1, n_x=4, n_u=2)
         self.p = params
 
     def h(self, x: torch.Tensor, u: torch.Tensor):
@@ -28,8 +28,8 @@ class CartPoleUnderactuation(UnderactuationConstraint):
 
     def hx(self, x: torch.Tensor, u: torch.Tensor):
         nB = x.shape[0]
-        ng = self.ng
-        nx = self.nx
+        n_h = self.n_h
+        n_x = self.n_x
 
         mp = self.p.mp
         lp = self.p.lp
@@ -40,7 +40,7 @@ class CartPoleUnderactuation(UnderactuationConstraint):
         sth = torch.sin(th)
         cth = torch.cos(th)
 
-        grad = torch.zeros((nB, ng, nx))
+        grad = torch.zeros((nB, n_h, n_x))
         # print((-mp * lp * sth * dds + mp * grav * lp * cth).shape)
         # exit()
         grad[:, 0:1, 1:2] = (-mp * lp * sth * dds + mp * grav * lp * cth).unsqueeze(2)
@@ -48,8 +48,8 @@ class CartPoleUnderactuation(UnderactuationConstraint):
 
     def hu(self, x: torch.Tensor, u: torch.Tensor):
         nB = x.shape[0]
-        ng = self.ng
-        nu = self.nu
+        n_h = self.n_h
+        n_u = self.n_u
 
         mp = self.p.mp
         lp = self.p.lp
@@ -58,7 +58,7 @@ class CartPoleUnderactuation(UnderactuationConstraint):
         sth = torch.sin(th)
         cth = torch.cos(th)
 
-        grad = torch.zeros((nB, ng, nu))
+        grad = torch.zeros((nB, n_h, n_u))
         grad[:, 0:1, 0:1] = (mp * lp * cth).unsqueeze(2)
         grad[:, 0:1, 1:] = mp * lp * lp
         return grad

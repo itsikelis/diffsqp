@@ -19,14 +19,16 @@ system:
 
 problem:
   inverse_dynamics: False
+  n_h: 0 # Number of underactuated DoFs
   n_batch: 3 # batch size
   dt: 0.01 # node dt
   tf: 1.0 # total horizon time
 
   # Initial and final states
-  x_init: [0.0, 0.0, 0.0, 0.0]
+  # x_init: [0.0, 0.0, 0.0, 0.0]
+  x_init: [3.14159, 0.0, 0.0, 0.0]
   x_des: [3.14159, 0.0, 0.0, 0.0]
-  noise_std: 0.0 # initial state noise std
+  noise_std: 0.1 # initial state noise std
 
   # Cost weights
   q_w: [1.0E-6, 1.0E-6, 1.0E-6, 1.0E-6]
@@ -40,4 +42,4 @@ solver:
   ls_max_iter: 10
   sqp_eps: 1.0E-4
   qp_solver: "lqr"
-  ls_function: "merit"
+  ls_function: "filter"

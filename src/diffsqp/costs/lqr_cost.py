@@ -29,27 +29,24 @@ class LqrCost(Cost):
             self.R = None
 
     def l(self, x: torch.Tensor, u: torch.Tensor = None):
-        x_term = torch.bmm(
-            torch.bmm(torch.transpose((x - self.x_des).unsqueeze(2), 1, 2), self.Q),
-            (x - self.x_des).unsqueeze(2),
-        ).squeeze(1, 2)
+        # Einstein summation of (x - xd) ^ T @ Q @ (x - xd)
+        diff_x = x - self.x_des
+        x_term = torch.einsum("...i, ...ij, ...j -> ...", diff_x, self.Q, diff_x)
 
         if self.R is None:
             return 0.5 * x_term
         else:
-            u_term = torch.bmm(
-                torch.bmm(torch.transpose((u - self.u_des).unsqueeze(2), 1, 2), self.R),
-                (u - self.u_des).unsqueeze(2),
-            ).squeeze(1, 2)
+            diff_u = u - self.u_des
+            u_term = torch.einsum("...i, ...ij, ...j -> ...", diff_u, self.R, diff_u)
             return 0.5 * (x_term + u_term)
 
     def lx(self, x, u=None):
         """Gradient w.r.t x (B, nx, 1)"""
-        return torch.bmm(self.Q, (x - self.x_des).unsqueeze(2)).squeeze(2)
+        return mv(self.Q, x - self.x_des)
 
     def lu(self, x, u):
         """Gradient w.r.t u (B, nu, 1)"""
-        return torch.bmm(self.R, (u - self.u_des).unsqueeze(2)).squeeze(2)
+        return mv(self.R, u - self.u_des)
 
     def lxx(self, x, u=None):
         """Hessian w.r.t xx (B, nx, nx)"""

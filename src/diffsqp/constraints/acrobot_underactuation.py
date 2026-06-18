@@ -7,7 +7,7 @@ from diffsqp.dynamics.acrobot_dynamics import AcrobotParameters
 
 class AcrobotUnderactuation(UnderactuationConstraint):
     def __init__(self, params: AcrobotParameters):
-        super().__init__(ng=1, nx=4, nu=2)
+        super().__init__(n_h=1, n_x=4, n_u=2)
         self.p = params
         if self.p.I1 is None:
             self.p.I1 = (params.m1 * params.l1**2) / 3.0
@@ -25,12 +25,12 @@ class AcrobotUnderactuation(UnderactuationConstraint):
         I1 = self.p.I1
         I2 = self.p.I2
 
-        th1 = x[:, 0:1]
-        th2 = x[:, 1:2]
-        dth1 = x[:, 2:3]
-        dth2 = x[:, 3:4]
-        ddth1 = u[:, 0:1]
-        ddth2 = u[:, 1:2]
+        th1 = x[..., 0:1]
+        th2 = x[..., 1:2]
+        dth1 = x[..., 2:3]
+        dth2 = x[..., 3:4]
+        ddth1 = u[..., 0:1]
+        ddth2 = u[..., 1:2]
 
         c2 = torch.cos(th2)
         s2 = torch.sin(th2)
@@ -47,7 +47,7 @@ class AcrobotUnderactuation(UnderactuationConstraint):
 
     def hx(self, x: torch.Tensor, u: torch.Tensor):
         nB = x.shape[0]
-        ng = self.ng
+        n_h = self.n_h
         n_x = self.n_x
 
         m1 = self.p.m1
@@ -60,12 +60,12 @@ class AcrobotUnderactuation(UnderactuationConstraint):
         I1 = self.p.I1
         I2 = self.p.I2
 
-        th1 = x[:, 0:1]
-        th2 = x[:, 1:2]
-        dth1 = x[:, 2:3]
-        dth2 = x[:, 3:4]
-        ddth1 = u[:, 0:1]
-        ddth2 = u[:, 1:2]
+        th1 = x[..., 0:1]
+        th2 = x[..., 1:2]
+        dth1 = x[..., 2:3]
+        dth2 = x[..., 3:4]
+        ddth1 = u[..., 0:1]
+        ddth2 = u[..., 1:2]
 
         c1 = torch.cos(th1)
         c2 = torch.cos(th2)
@@ -73,7 +73,7 @@ class AcrobotUnderactuation(UnderactuationConstraint):
         s2 = torch.sin(th2)
         c12 = torch.cos(th1 + th2)
 
-        grad = torch.zeros((nB, ng, nx))
+        grad = torch.zeros((nB, n_h, n_x))
 
         dres_dth1 = -m1 * grav * lc1 * c1 - m2 * grav * (l1 * c1 + lc2 * c12)
 
@@ -103,8 +103,8 @@ class AcrobotUnderactuation(UnderactuationConstraint):
 
     def hu(self, x: torch.Tensor, u: torch.Tensor):
         nB = x.shape[0]
-        ng = self.ng
-        nu = self.nu
+        n_h = self.n_h
+        n_u = self.n_u
 
         m1 = self.p.m1
         m2 = self.p.m2
@@ -116,12 +116,12 @@ class AcrobotUnderactuation(UnderactuationConstraint):
         I1 = self.p.I1
         I2 = self.p.I2
 
-        th1 = x[:, 0:1]
-        th2 = x[:, 1:2]
-        dth1 = x[:, 2:3]
-        dth2 = x[:, 3:4]
-        ddth1 = u[:, 0:1]
-        ddth2 = u[:, 1:2]
+        th1 = x[..., 0:1]
+        th2 = x[..., 1:2]
+        dth1 = x[..., 2:3]
+        dth2 = x[..., 3:4]
+        ddth1 = u[..., 0:1]
+        ddth2 = u[..., 1:2]
 
         c1 = torch.cos(th1)
         c2 = torch.cos(th2)
@@ -132,7 +132,7 @@ class AcrobotUnderactuation(UnderactuationConstraint):
         mult1 = I1 + I2 + m2 + l1 * l1 + 2.0 * m2 * l1 * lc2 * c2
         mult2 = I2 + m2 * l1 * lc2 * c2
 
-        grad = torch.zeros((nB, ng, nu))
+        grad = torch.zeros((nB, n_h, n_u))
         grad[:, 0:1, 0:1] = mult1.unsqueeze(2)
         grad[:, 0:1, 1:2] = mult2.unsqueeze(2)
         return grad

@@ -14,14 +14,15 @@ system:
 
 problem:
   inverse_dynamics: True
-  n_batch: 2 # batch size
+  n_h: 1 # Number of underactuated DoFs
+  n_batch: 3 # batch size
   dt: 0.01 # node dt
   tf: 1.0 # total horizon time
 
   # Initial and final states
   x_init: [0.0, 0.0, 0.0, 0.0]
   x_des: [0.0, 3.14159, 0.0, 0.0]
-  noise_std: 0.0 # initial state noise std
+  noise_std: 0.1 # initial state noise std
 
   # Cost weights
   q_w: [1.0E-6, 1.0E-6, 1.0E-6, 1.0E-6]
