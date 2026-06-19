@@ -124,7 +124,7 @@ class Sqp:
             delta_x_qp, delta_u_qp, mu_qp, nu_qp = self.qp_solver.solve()
 
             # Line search
-            # TODO: Log line search time and total iters
+            # TODO: Log line search time
             ls_info = self.line_search_(
                 self.prob.states,
                 self.prob.controls,
@@ -285,9 +285,6 @@ class Sqp:
         # cost: total cost
         # constr_inf: ||constr||_inf
 
-        # states = torch.stack(x_cand, dim=0)
-        # controls = torch.stack(u_cand, dim=0)
-
         cost = self.total_cost_(x_cand, u_cand)
         dyn = self.dynamics_violation_(x_cand[:, 1:], x_cand[:, :-1], u_cand[:])
         dyn_inf = torch.norm(dyn, p=float("inf"), dim=[1, 2])
@@ -316,25 +313,3 @@ class Sqp:
     def underactuation_violation_(self, x, u):
         h = self.prob.underactuation.h
         return h(x, u)
-
-    # Calculate Lagrangian gradients
-    def calc_Lx_Lu(self):
-        dt = self.prob.dt
-        Lx = torch.zeros((self.prob.n_batch, self.prob.n_x))
-        Lu = torch.zeros((self.prob.n_batch, self.prob.n_u))
-        for k in range(self.horizon - 1):
-            x = self.prob.states[:, k]
-            u = self.prob.controls[:, k]
-            pi_0 = self.prob.pi[k]
-            pi_1 = self.prob.pi[k + 1]
-            lx = self.prob.lx
-            lu = self.prob.lu
-            fx = self.prob.dynamics.fx
-            fu = self.prob.dynamics.fu
-            Lx += lx(k, x, u)
-            Lu += lu(k, x, u)
-        # Add final node cost
-        x_N = self.prob.states[:, -1]
-        Lx += self.prob.lx(-1, x_N)
-
-        return Lx, Lu
