@@ -4,7 +4,7 @@ from diffsqp.problems import Problem
 from diffsqp.costs import LqrCost
 from diffsqp.dynamics import PendulumDynamics
 from diffsqp.solvers import Lqr
-from diffsqp.solvers import Sqp, SqpParams
+from diffsqp.solvers import Sqp, SqpParameters
 
 # torch.set_default_device("cuda")
 
@@ -41,7 +41,7 @@ prob.costs.append([LqrCost(Q=Qf, x_des=x_des)])
 # solver = Admm(prob)
 # solver.step()
 
-sqp_params = SqpParams(qp_solver="lqr", n_B=n_B, max_iter=500, eps=1e-4)
+sqp_params = SqpParameters(qp_solver="lqr", n_B=n_B, max_iter=500, eps=1e-4)
 solver = Sqp(prob, sqp_params)
 
 solver.solve()

@@ -4,12 +4,13 @@ import torch
 from diffsqp.utils.math import mm, mv, inf_norm
 from typing import List
 
-from diffsqp.problems import Problem, ProblemParams
+from diffsqp.problems import Problem, ProblemParameters
 from diffsqp.solvers import Lqr, QP
 from dataclasses import dataclass
+from diffsqp.types import Trajectory, QpParameters
 
 
-class SqpParams:
+class SqpParameters:
     def __init__(self, **args):
         self.sqp_max_iter: int = args["sqp_max_iter"]
         self.merit_mu: float = args["merit_mu"]
@@ -85,7 +86,12 @@ class SqpSolutionLog:
 
 
 class Sqp:
-    def __init__(self, prob: Problem, params: SqpParams) -> None:
+    def __init__(
+        self,
+        prob: Problem,
+        params: SqpParameters,
+        init_guess: Trajectory,
+    ) -> None:
         self.prob = prob
         self.params = params
         self.horizon = self.prob.horizon
@@ -98,8 +104,8 @@ class Sqp:
             self.qp_solver = QP(prob)
 
         self.best_cost, self.best_constr_inf = self.calc_metrics_(
-            self.prob.states,
-            self.prob.controls,
+            self.current_guess.x,
+            self.current_guess.u,
         )
         if self.params.ls_function == "merit":
             # Merit function
@@ -121,17 +127,12 @@ class Sqp:
             # Get LQR corrections
             # TODO: Log QP solve time
             # Perform ADMM step
-            delta_x_qp, delta_u_qp, mu_qp, nu_qp = self.qp_solver.solve()
+            dx, du, mu_, nu_ = self.qp_solver.solve(self.current_guess)
 
             # Line search
             # TODO: Log line search time
             ls_info = self.line_search_(
-                self.prob.states,
-                self.prob.controls,
-                delta_x_qp,
-                delta_u_qp,
-                mu_qp,
-                nu_qp,
+                self.current_guess.x, self.current_guess.u, dx, du, mu_, nu_
             )
 
             if ls_info["iterations"] == self.params.ls_max_iter - 1:
@@ -140,7 +141,7 @@ class Sqp:
             self.log.ls_iters.append(ls_info["iterations"])
 
             # Check termination
-            self.terminated = self.check_termination_(delta_x_qp, delta_u_qp)
+            self.terminated = self.check_termination_(dx, du)
             if self.terminated.all():
                 break
         t_solve_end = time.time()
@@ -202,12 +203,12 @@ class Sqp:
 
     def update_variables_(self, update_mask, x_, u_, mu_, nu_):
         for k in range(self.horizon - 1):
-            self.prob.states[:, k][update_mask] = x_[:, k][update_mask]
-            self.prob.controls[:, k][update_mask] = u_[:, k][update_mask]
-            self.prob.mu[:, k + 1][update_mask] = mu_[:, k + 1][update_mask]
+            self.current_guess.x[:, k][update_mask] = x_[:, k][update_mask]
+            self.current_guess.u[:, k][update_mask] = u_[:, k][update_mask]
+            self.current_guess.mu[:, k + 1][update_mask] = mu_[:, k + 1][update_mask]
             if self.prob.underactuation is not None:
-                self.prob.nu[:, k][update_mask] = nu_[:, k][update_mask]
-        self.prob.states[:, -1][update_mask] = x_[:, -1][update_mask]
+                self.current_guess.nu[:, k][update_mask] = nu_[:, k][update_mask]
+        self.current_guess.x[:, -1][update_mask] = x_[:, -1][update_mask]
 
     def normalize_hessians_(dones):
         pass
@@ -232,14 +233,16 @@ class Sqp:
         ## Constraint Violations ##
         # Dynamics
         dyn = self.dynamics_violation_(
-            self.prob.states[:, 1:], self.prob.states[:, :-1], self.prob.controls[:]
+            self.current_guess.x[:, 1:],
+            self.current_guess.x[:, :-1],
+            self.current_guess.u[:],
         )
         dyn_inf = torch.norm(dyn, p=float("inf"), dim=[1, 2])
 
         # Underactuation
         if self.prob.underactuation is not None:
             uact = self.underactuation_violation_(
-                self.prob.states[:, :-1], self.prob.controls[:]
+                self.current_guess.x[:, :-1], self.current_guess.u[:]
             )
             uact_inf = torch.norm(uact, p=float("inf"), dim=[1, 2])
 
@@ -284,7 +287,6 @@ class Sqp:
         # Returns:
         # cost: total cost
         # constr_inf: ||constr||_inf
-
         cost = self.total_cost_(x_cand, u_cand)
         dyn = self.dynamics_violation_(x_cand[:, 1:], x_cand[:, :-1], u_cand[:])
         dyn_inf = torch.norm(dyn, p=float("inf"), dim=[1, 2])

@@ -1,1 +1,1 @@
-from .base_problem import Problem, ProblemParams
+from .base_problem import Problem, ProblemParameters

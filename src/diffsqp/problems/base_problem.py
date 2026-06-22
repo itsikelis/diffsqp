@@ -9,7 +9,7 @@ from diffsqp.constraints import UnderactuationConstraint, GenericConstraint
 from diffsqp.utils.math import mv
 
 
-class ProblemParams:
+class ProblemParameters:
     def __init__(self, **args):
         # self.system: str = args["name"]
         self.inverse_dynamics: bool = args["inverse_dynamics"]
@@ -36,44 +36,21 @@ class ProblemParams:
 class Problem(ABC):
     """
     An abstract base class representing a Trajectory Optimization problem.
-
-    Attributes:
-        horizon (int): The total number of time steps (T).
-        dt (float): The integration time step.
-        n_x (int): Dimension of the state vector.
-        n_u (int): Dimension of the control vector.
-        costs (List[List[Cost]]): A list of length `horizon`, where each element
-            is a list of Cost objects active at that stage.
-        dynamics (Dynamics): The dynamics model.
-        underactuation (Constraints): The underactuation equality constraints.
-        constraints (List[Constraints]): A list of constraint objects for each stage.
-        states (List[torch.Tensor]): The current state trajectory [nB x n_x].
-        controls (List[torch.Tensor]): The current control trajectory [nB x n_u].
-        pi (List[torch.Tensor]): Lagrange multipliers for dynamics (equality) constraints.
-        ni (List[torch.Tensor]): Lagrange multipliers for general equality constraints.
     """
 
-    def __init__(self, params: ProblemParams) -> None:
-        """
-        Initializes the optimization problem buffers.
-
-        Args:
-            horizon (int): Horizon length.
-            dt (float): Integration dt.
-            nB (int): Batch size for parallel trajectory optimization.
-            n_x (int): State dimension.
-            n_u (int): Control dimension.
-        """
+    def __init__(self, params: ProblemParameters) -> None:
         self.horizon = params.horizon
         self.dt = params.dt
         self.n_x = params.n_x
         self.n_u = params.n_u
         self.n_h = params.n_h
         self.n_batch = params.n_batch
+
         self.costs: List[List[Cost]] = []
         self.dynamics: Dynamics = None
         self.underactuation: UnderactuationConstraint = None
         self.constraints: List[GenericConstraint] = [None] * self.horizon
+
         self.states: torch.Tensor = torch.zeros((self.n_batch, self.horizon, self.n_x))
         self.controls: torch.Tensor = torch.zeros(
             (self.n_batch, self.horizon - 1, self.n_u)

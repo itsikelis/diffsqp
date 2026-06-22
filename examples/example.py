@@ -6,14 +6,14 @@ import yaml
 
 import numpy as np
 
-from diffsqp.problems import Problem, ProblemParams
+from diffsqp.problems import Problem, ProblemParameters
 from diffsqp.costs import LqrCost
-from diffsqp.solvers import Lqr
-from diffsqp.solvers import Sqp, SqpParams
+from diffsqp.solvers import Sqp, SqpParameters
 from diffsqp.dynamics import Dynamics, AcrobotDynamics, CartPoleDynamics
 from diffsqp.dynamics import AcrobotParameters, CartPoleParameters
 from diffsqp.constraints import AcrobotUnderactuation, CartPoleUnderactuation
 from diffsqp.utils.animate import AcrobotAnimator, CartPoleAnimator
+from diffsqp.types import Trajectory
 
 
 def load_config(config_path):
@@ -36,9 +36,9 @@ args = parser.parse_args()
 print(f"Loading problem configuration from: {args.config}")
 cfg = load_config(args.config)
 print(f"Successfully loaded parameters:")
-sqp_params = SqpParams(**cfg["solver"])
+sqp_params = SqpParameters(**cfg["solver"])
 print(sqp_params)
-prob_params = ProblemParams(**cfg["problem"])
+prob_params = ProblemParameters(**cfg["problem"])
 
 if cfg["system"]["name"] == "acrobot":
     sys_params = AcrobotParameters(**cfg["system"])
@@ -65,17 +65,25 @@ elif cfg["system"]["name"] == "cartpole":
 # Create problem
 print(f"Solving..")
 prob = Problem(prob_params)
+initial_guess = Trajectory(
+    x=torch.zeros((prob.n_batch, prob.horizon, prob.n_x)),
+    u=torch.zeros((prob.n_batch, prob.horizon - 1, prob.n_u)),
+    mu=torch.zeros((prob.n_batch, prob.horizon, prob.n_x)),
+    nu=torch.zeros((prob.n_batch, prob.horizon, prob.n_u)),
+    lam=None,
+)
 
 # Costs
 Q = prob_params.q_w * torch.eye(dyn.nx).repeat(prob_params.n_batch, 1, 1)
 R = prob_params.r_w * torch.eye(dyn.nu).repeat(prob_params.n_batch, 1, 1)
 Qf = prob_params.qf_w * torch.eye(dyn.nx).repeat(prob_params.n_batch, 1, 1)
-# Set stage initial guess and costs
+
+# Set stage costs an initial guess
 for i in range(prob.horizon - 1):
-    prob.states[:, i] = prob_params.x_init.clone()
+    initial_guess.x[:, i] = prob_params.x_init.clone()
     prob.costs.append([LqrCost(Q=Q, R=R)])
 # Set terminal cost
-prob.states[:, -1] = prob_params.x_des.clone()
+initial_guess.x[:, -1] = prob_params.x_des.clone()
 prob.costs.append([LqrCost(Q=Qf, x_des=prob_params.x_des.clone())])
 
 # Constraints
@@ -87,7 +95,7 @@ else:
 
 
 # Create solver and solve
-solver = Sqp(prob, sqp_params)
+solver = Sqp(prob, sqp_params, initial_guess)
 
 start = time.time()
 try:
@@ -143,13 +151,13 @@ def plot_controls(controls_tensor):
     plt.show()
 
 
-# plot_states(prob.states)
-# plot_controls(prob.controls)
+# plot_states(solver.current_guess.x)
+# plot_controls(solver.current_guess.u)
 
 # Animate:
 if sys_params.name == "acrobot":
     anim = AcrobotAnimator(
-        prob.states,
+        solver.current_guess.x,
         sys_params.l1,
         sys_params.l2,
         prob_params.dt,
@@ -157,7 +165,7 @@ if sys_params.name == "acrobot":
     )
 elif sys_params.name == "cartpole":
     anim = CartPoleAnimator(
-        prob.states,
+        solver.current_guess.x,
         sys_params.lp,
         prob_params.dt,
         prob_params.n_batch,

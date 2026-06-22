@@ -92,8 +92,8 @@ class CartPoleDynamics(Dynamics):
         ) + (lp * mp * cos(th) * sin(th) * dth * dth) * (
             lp * mp * 2 * cos(th) * sin(th)
         )
-        numerator_b = (u * sin(th)) * (lp * mc + lp * mp * (1 - cos(th) * cos(th))) + (
-            u * cos(th)
+        numerator_b = (fx * sin(th)) * (lp * mc + lp * mp * (1 - cos(th) * cos(th))) + (
+            fx * cos(th)
         ) * (lp * mp * 2 * cos(th) * sin(th))
         numerator_c = -((mc + mp) * grav * cos(th)) * (
             lp * mc + lp * mp * (1 - cos(th) * cos(th))

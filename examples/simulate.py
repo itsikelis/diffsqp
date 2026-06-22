@@ -6,7 +6,7 @@ import yaml
 
 import numpy as np
 
-from diffsqp.problems import ProblemParams
+from diffsqp.problems import ProblemParameters
 from diffsqp.dynamics import Dynamics, AcrobotDynamics, CartPoleDynamics
 from diffsqp.dynamics import AcrobotParameters, CartPoleParameters
 from diffsqp.utils.animate import AcrobotAnimator, CartPoleAnimator
@@ -31,7 +31,7 @@ args = parser.parse_args()
 
 print(f"Loading problem configuration from: {args.config}")
 cfg = load_config(args.config)
-prob_params = ProblemParams(**cfg["problem"])
+prob_params = ProblemParameters(**cfg["problem"])
 print(f"Successfully loaded parameters. Starting solver...")
 
 # 1. Setup Parameters

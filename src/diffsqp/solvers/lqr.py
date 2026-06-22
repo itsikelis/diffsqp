@@ -2,6 +2,7 @@ import torch
 
 from diffsqp.problems import Problem
 from diffsqp.utils.math import mm, mv, tran
+from diffsqp.types import Trajectory
 
 
 class Lqr:
@@ -27,7 +28,7 @@ class Lqr:
         # Lagrange multipliers of the underactuation part
         self.nu = torch.zeros((self.nB, self.horizon - 1, self.prob.n_h))
 
-    def solve(self):
+    def solve(self, current_guess: Trajectory):
         # TODO: Time these
         self.backward_pass_()
         self.forward_pass_()
