@@ -2,7 +2,7 @@ import torch
 
 from diffsqp.problems import Problem
 from diffsqp.utils.math import mm, mv, tran
-from diffsqp.types import Trajectory, QpParameters
+from diffsqp.types import Trajectory, QpParameters, QpSolution
 
 
 def lqr_backward_pass(problem: Problem, matrices: QpParameters):
@@ -10,9 +10,11 @@ def lqr_backward_pass(problem: Problem, matrices: QpParameters):
     horizon = problem.horizon
     n_x = problem.n_x
     n_u = problem.n_u
+    n_h = problem.n_h
 
-    K = torch.zeros((batch_size, horizon - 1, n_u, n_x))
-    k = torch.zeros((batch_size, horizon - 1, n_u))
+    K = torch.zeros((batch_size, horizon - 1, n_u + n_h, n_x))
+    k = torch.zeros((batch_size, horizon - 1, n_u + n_h))
+
     P = torch.zeros((batch_size, horizon, n_x, n_x))
     p = torch.zeros((batch_size, horizon, n_x))
 
@@ -30,7 +32,7 @@ def lqr_backward_pass(problem: Problem, matrices: QpParameters):
         A_i, B_i, b_i = matrices.A[:, i], matrices.B[:, i], matrices.b[:, i]
 
         C_i, D_i, d_i = None, None, None
-        if matrices.C is not None:
+        if problem.inverse_dynamics:
             C_i, D_i, d_i = matrices.C[:, i], matrices.D[:, i], matrices.d[:, i]
 
         (
@@ -95,7 +97,7 @@ def lqr_forward_pass(problem: Problem, K, k, P, p, A, B, b):
             b=b_i,
         )
 
-    return dx, du, mu, nu
+    return QpSolution(dx=dx, du=du, mu=mu, nu=nu, lam=None)
 
 
 def lqr_step_backward_(Q, q, R, r, S, P_next, p_next, A, B, b, C=None, D=None, d=None):
@@ -117,8 +119,8 @@ def lqr_step_backward_(Q, q, R, r, S, P_next, p_next, A, B, b, C=None, D=None, d
 
     if C is not None:
         n_u = R_.shape[-2]
-        n_g = D.shape[-2]
-        dim = n_u + n_g
+        n_h = D.shape[-2]
+        dim = n_u + n_h
 
         R_ext = torch.zeros((*R_.shape[:-2], dim, dim))
         R_ext[..., :n_u, :n_u] = R_

@@ -39,6 +39,7 @@ class Problem(ABC):
     """
 
     def __init__(self, params: ProblemParameters) -> None:
+        self.inverse_dynamics = params.inverse_dynamics
         self.horizon = params.horizon
         self.dt = params.dt
         self.n_x = params.n_x
@@ -51,93 +52,9 @@ class Problem(ABC):
         self.underactuation: UnderactuationConstraint = None
         self.constraints: List[GenericConstraint] = [None] * self.horizon
 
-        self.states: torch.Tensor = torch.zeros((self.n_batch, self.horizon, self.n_x))
-        self.controls: torch.Tensor = torch.zeros(
-            (self.n_batch, self.horizon - 1, self.n_u)
-        )
-        self.mu: torch.Tensor = torch.zeros((self.n_batch, self.horizon, self.n_x))
-        self.nu: torch.Tensor = torch.zeros((self.n_batch, self.horizon - 1, self.n_u))
-        self.lam: torch.Tensor = torch.zeros((self.n_batch, self.horizon, self.n_u))
-
         # Initialize gradient tensors
         self.Lx = torch.zeros((self.n_batch, self.horizon, self.n_x))
         self.Lu = torch.zeros((self.n_batch, self.horizon - 1, self.n_u))
-
-    # --- Lagrangian Calculation Methods ---
-
-    def Lx_Lu(self):
-        """
-        Calculates the gradient of the Lagrangian with respect to states (x) and controls (u).
-
-        Returns:
-            Lx (torch.Tensor): Gradients w.r.t states for stages 0 to N. Dimensions: horizon x n_batch x nx
-            Lu (torch.Tensor): Gradients w.r.t controls for stages 0 to N-1. Dimensions: horizon-1 x n_batch x nx
-        """
-
-        # Intermediate stages (k = 0 to N-1)
-        for k in range(self.horizon - 1):
-            x_k = self.states[:, k]
-            u_k = self.controls[:, k]
-            mu_k = self.mu[:, k]
-            mu_next = self.mu[:, k + 1]
-
-            # --- 1a. Fetch Gradients & Jacobians ---
-            cx_k = self.lx(k, x_k, u_k)  # Cost gradient w.r.t x [n_batch, n_x]
-            cu_k = self.lu(k, x_k, u_k)  # Cost gradient w.r.t u [n_batch, n_u]
-
-            fx_k = self.dynamics.fx(
-                x_k, u_k, self.dt
-            )  # Dynamics Jacobian w.r.t x [n_batch, n_x, n_x]
-            fu_k = self.dynamics.fu(
-                x_k, u_k, self.dt
-            )  # Dynamics Jacobian w.r.t u [n_batch, n_x, n_u]
-
-            # Base Lagrangian Gradients (Cost + Dynamics)
-            Lx_k = cx_k + mv(fx_k.transpose(1, 2), mu_next) - mu_k
-            Lu_k = cu_k + mv(fu_k.transpose(1, 2), mu_next)
-
-            # Underactuation Constraint Terms
-            if self.underactuation is not None:
-                # Assuming you have a lambda multiplier list initialized elsewhere
-                nu_k = self.nu[k]
-                hx_k = self.underactuation.hx(
-                    x_k, u_k
-                )  # Underactuation Jacobian w.r.t x [n_batch, n_h, n_x]
-                hu_k = self.underactuation.hu(
-                    x_k, u_k
-                )  # Underactuation Jacobian w.r.t u [n_batch, n_h, n_u]
-
-                Lx_k += mv(hx_k.transpose(1, 2), nu_k)
-                Lu_k += mv(hu_k.transpose(1, 2), nu_k)
-
-            # Inequality Constraint Terms
-            if self.constraints[k] is not None:
-                lam_k = self.lam[k]
-                gx_k = self.gx(
-                    k, x_k, u_k
-                )  # Constraint Jacobian w.r.t x [n_batch, n_c, n_x]
-                gu_k = self.gu(
-                    k, x_k, u_k
-                )  # Constraint Jacobian w.r.t u [n_batch, n_c, n_u]
-
-                Lx_k += mv(gx_k.transpose(1, 2), lam_k)
-                Lu_k += mv(gu_k.transpose(1, 2), lam_k)
-
-            # Store computed gradients
-            self.Lx[k] = Lx_k
-            self.Lu[k] = Lu_k
-
-        # 2. Terminal stage (N)
-        x_N = self.states[:, -1]
-        mu_N = self.mu[:, -1]
-
-        cx_N = self.lx(-1, x_N)  # Terminal cost gradient w.r.t x [n_batch, n_x]
-
-        # TODO: Add terminal constraint support
-        self.Lx[-1] = cx_N - mu_N
-
-        self.Lx[0] = 0.0
-        return self.Lx, self.Lu
 
     # --- Cost Aggregation Methods ---
 

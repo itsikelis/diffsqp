@@ -8,7 +8,7 @@ import numpy as np
 
 from diffsqp.problems import Problem, ProblemParameters
 from diffsqp.costs import LqrCost
-from diffsqp.solvers import Sqp, SqpParameters
+from diffsqp.solvers import sqp_solve, SqpParameters
 from diffsqp.dynamics import Dynamics, AcrobotDynamics, CartPoleDynamics
 from diffsqp.dynamics import AcrobotParameters, CartPoleParameters
 from diffsqp.constraints import AcrobotUnderactuation, CartPoleUnderactuation
@@ -69,7 +69,7 @@ initial_guess = Trajectory(
     x=torch.zeros((prob.n_batch, prob.horizon, prob.n_x)),
     u=torch.zeros((prob.n_batch, prob.horizon - 1, prob.n_u)),
     mu=torch.zeros((prob.n_batch, prob.horizon, prob.n_x)),
-    nu=torch.zeros((prob.n_batch, prob.horizon, prob.n_u)),
+    nu=torch.zeros((prob.n_batch, prob.horizon - 1, prob.n_h)),
     lam=None,
 )
 
@@ -94,12 +94,10 @@ else:
     prob.dynamics = dyn
 
 
-# Create solver and solve
-solver = Sqp(prob, sqp_params, initial_guess)
-
+# Solve
 start = time.time()
 try:
-    log = solver.solve()
+    solution, log = sqp_solve(prob, sqp_params, initial_guess)
 except KeyboardInterrupt:
     print("Keyboard  Interrupt")
 end = time.time()
@@ -151,13 +149,13 @@ def plot_controls(controls_tensor):
     plt.show()
 
 
-# plot_states(solver.current_guess.x)
-# plot_controls(solver.current_guess.u)
+# plot_states(solution.x)
+# plot_controls(solution.u)
 
 # Animate:
 if sys_params.name == "acrobot":
     anim = AcrobotAnimator(
-        solver.current_guess.x,
+        solution.x,
         sys_params.l1,
         sys_params.l2,
         prob_params.dt,
@@ -165,7 +163,7 @@ if sys_params.name == "acrobot":
     )
 elif sys_params.name == "cartpole":
     anim = CartPoleAnimator(
-        solver.current_guess.x,
+        solution.x,
         sys_params.lp,
         prob_params.dt,
         prob_params.n_batch,
