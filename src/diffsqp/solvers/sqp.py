@@ -1,18 +1,25 @@
 import sys
 import time
 import torch
+from copy import copy
 from diffsqp.utils.math import mm, mv, inf_norm
 from typing import List
 
 from diffsqp.problems import Problem, ProblemParameters
 from diffsqp.solvers import QP
-from diffsqp.solvers import lqr_forward_pass, lqr_backward_pass
+from diffsqp.solvers import admm_solve, lqr_solve
 from dataclasses import dataclass
-from diffsqp.types import Trajectory, QpParameters, QpSolution
+from diffsqp.types import SqpSolution, AdmmSolution, LqrSolution
 
 
 class SqpParameters:
     def __init__(self, **args):
+        self.admm_max_iter: int = args["admm_max_iter"]
+        self.admm_eps: float = args["admm_eps"]
+        self.admm_alpha: float = args["admm_alpha"]
+        self.admm_sigma: float = args["admm_sigma"]
+        self.admm_rho: float = args["admm_rho"]
+
         self.sqp_max_iter: int = args["sqp_max_iter"]
         self.merit_mu: float = args["merit_mu"]
         self.ls_max_iter: int = args["ls_max_iter"]
@@ -79,36 +86,6 @@ class SqpSolutionLog:
         )
 
 
-# Return total trajectory cost and constraint violations
-def evaluate_trajectory(problem: Problem, trajectory: Trajectory):
-    batch_size = problem.n_batch
-    horizon = problem.horizon
-    dt = problem.dt
-
-    # Calculate total trajectory cost
-    cost = torch.zeros((batch_size))
-    for k in range(horizon - 1):
-        cost += problem.l(k, trajectory.x[:, k], trajectory.u[:, k])
-    cost += problem.l(-1, trajectory.x[:, -1])
-
-    # Dynamics violation
-    x_next = trajectory.x[:, 1:]
-    x_curr = trajectory.x[:, :-1]
-    u_curr = trajectory.u[:]
-    dynamics_violations = x_next - problem.dynamics.f(x_curr, u_curr, dt)
-    max_dynamics_violation = torch.norm(dynamics_violations, p=float("inf"), dim=[1, 2])
-
-    # Underactuation violation
-    if problem.underactuation is not None:
-        uact_violation = problem.underactuation.h(x_curr, u_curr)
-        max_uact_violation = torch.norm(uact_violation, p=float("inf"), dim=[1, 2])
-
-    if problem.underactuation is None:
-        return cost, max_dynamics_violation
-    else:
-        return cost, torch.maximum(max_dynamics_violation, max_uact_violation)
-
-
 ## What to keep as info:
 # QP time
 # Line search time
@@ -116,68 +93,13 @@ def evaluate_trajectory(problem: Problem, trajectory: Trajectory):
 # Total SQP iterations
 
 
-def get_linearized_matrices(prob: Problem, trajectory: Trajectory):
-    batch_size = prob.n_batch
-    horizon = prob.horizon
-    n_x, n_u = prob.n_x, prob.n_u
-    n_h = prob.n_h
-
-    Q = torch.zeros((batch_size, horizon, n_x, n_x))
-    q = torch.zeros((batch_size, horizon, n_x))
-    R = torch.zeros((batch_size, horizon - 1, n_u, n_u))
-    r = torch.zeros((batch_size, horizon - 1, n_u))
-    S = torch.zeros((batch_size, horizon - 1, n_u, n_x))
-
-    A = torch.zeros((batch_size, horizon - 1, n_x, n_x))
-    B = torch.zeros((batch_size, horizon - 1, n_x, n_u))
-    b = torch.zeros((batch_size, horizon - 1, n_x))
-
-    C = None
-    D = None
-    d = None
-    if prob.underactuation is not None:
-        n_h = prob.n_h
-        C = torch.zeros((batch_size, horizon - 1, n_h, n_x))
-        D = torch.zeros((batch_size, horizon - 1, n_h, n_u))
-        d = torch.zeros((batch_size, horizon - 1, n_h))
-
-    # Fill matrices
-    for i in range(horizon - 1):
-        x_lin, u_lin, x_next = (
-            trajectory.x[:, i],
-            trajectory.u[:, i],
-            trajectory.x[:, i + 1],
-        )
-
-        A[:, i] = prob.dynamics.fx(x_lin, u_lin, prob.dt)
-        B[:, i] = prob.dynamics.fu(x_lin, u_lin, prob.dt)
-        b[:, i] = prob.dynamics.f(x_lin, u_lin, prob.dt) - x_next
-
-        Q[:, i] = prob.lxx(i, x_lin, u_lin)
-        q[:, i] = prob.lx(i, x_lin, u_lin)
-        R[:, i] = prob.luu(i, x_lin, u_lin)
-        r[:, i] = prob.lu(i, x_lin, u_lin)
-        S[:, i] = prob.lux(i, x_lin, u_lin)
-
-        # Underactuation augmentation
-        if prob.underactuation is not None:
-            C[:, i] = prob.underactuation.hx(x_lin, u_lin)
-            D[:, i] = prob.underactuation.hu(x_lin, u_lin)
-            d[:, i] = prob.underactuation.h(x_lin, u_lin)
-
-    x_F = trajectory.x[:, -1]
-    Q[:, -1] = prob.lxx(-1, x_F)
-    q[:, -1] = prob.lx(-1, x_F)
-
-    return QpParameters(Q=Q, q=q, R=R, r=r, S=S, A=A, B=B, b=b, C=C, D=D, d=d)
-
-
-def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: Trajectory):
+def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSolution):
     batch_size = problem.n_batch
 
     terminated = torch.zeros((batch_size), dtype=torch.bool)
+    line_search_fails = 0
     current_guess = initial_guess
-    best_cost, best_constr_inf = evaluate_trajectory(problem, current_guess)
+    best_cost, best_constr_inf = problem.evaluate_guess(current_guess)
     if parameters.ls_function == "merit":
         # Merit function
         merit_mu = parameters.merit_mu
@@ -187,29 +109,47 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: Trajec
     # Solve for sqp_max_iter steps
     t_solve_start = time.time()
     for iter in range(parameters.sqp_max_iter):
-        # Linearize problem
-        mat = get_linearized_matrices(problem, current_guess)
-        # Get LQR corrections
-        # dx, du, mu_, nu_ = self.qp_solver.solve(self.current_guess, mat)
-        K, k, P, p = lqr_backward_pass(problem, mat)
-        corrections = lqr_forward_pass(problem, K, k, P, p, mat.A, mat.B, mat.b)
+        print("Iter: ", iter)
+        ## Linearize problem ##
+        regularization_scale = line_search_fails * 1e-8
+        mat = problem.linearize(current_guess, regularization_scale)
 
-        # Line search
+        # Solve the unconstrained problem
+        # admm_solution = lqr_solve(
+        #     problem,
+        #     mat.Q,
+        #     mat.q,
+        #     mat.R,
+        #     mat.r,
+        #     mat.S,
+        #     mat.A,
+        #     mat.B,
+        #     mat.b,
+        #     mat.C,
+        #     mat.D,
+        #     mat.d
+        # )
+
+        # Solve the constrained problem
+        admm_solution = admm_solve(problem, parameters, mat)
+
+        ## Line search ##
         # TODO: Log line search time
-        # ls_info = self.line_search_(problem, parameters, current_guess, corrections)
+        # ls_info = self.line_search_(problem, parameters, current_guess, admm_results)
         alpha = torch.ones((batch_size))
         dones = terminated.clone()
         for ls_iter in range(parameters.ls_max_iter):
-            new_guess = Trajectory(
-                x=current_guess.x + torch.einsum("b,bhj->bhj", alpha, corrections.dx),
-                u=current_guess.u + torch.einsum("b,bhj->bhj", alpha, corrections.du),
-                mu=corrections.mu,
-                nu=corrections.nu,
-                lam=None,
+            new_guess = SqpSolution(
+                x=current_guess.x + torch.einsum("b,bhj->bhj", alpha, admm_solution.dx),
+                u=current_guess.u + torch.einsum("b,bhj->bhj", alpha, admm_solution.du),
+                mu=admm_solution.mu,
+                nu=admm_solution.nu,
+                ksi=None,
+                # ksi=admm_solution.ksi,
             )
 
             # Evaluate current alpha
-            cost, constr_inf = evaluate_trajectory(problem, new_guess)
+            cost, constr_inf = problem.evaluate_guess(new_guess)
             # Backtracking line search option
             if parameters.ls_function == "filter":
                 cost_improved = cost < best_cost
@@ -238,11 +178,14 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: Trajec
             # Decrease alpha
             alpha[~dones] *= 0.5
             if torch.all(dones):
+                # Reset line search fails
+                line_search_fails = 0
                 break
 
         log.ls_iters.append(ls_iter + 1)
         if ls_iter == parameters.ls_max_iter - 1:
             print("Line search failed")
+            line_search_fails += 1
 
         #######################
         ## Check termination ##
@@ -256,8 +199,8 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: Trajec
 
         ## Primal Feasibility ##
         # Computing Lx, Lu is expensive, so we check for stationarity in dx.T @ dx, du.T @ du
-        dot_delta_x = torch.einsum("bhi,bhi->bh", corrections.dx, corrections.dx)
-        dot_delta_u = torch.einsum("bhi,bhi->bh", corrections.du, corrections.du)
+        dot_delta_x = torch.einsum("bhi,bhi->bh", admm_solution.dx, admm_solution.dx)
+        dot_delta_u = torch.einsum("bhi,bhi->bh", admm_solution.du, admm_solution.du)
         dx_inf = torch.norm(dot_delta_x, p=float("inf"), dim=[1])
         du_inf = torch.norm(dot_delta_u, p=float("inf"), dim=[1])
         stationarity = torch.logical_and(
@@ -285,27 +228,3 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: Trajec
         log.cuda_reserved_bytes = torch.cuda.memory_reserved(0)
         log.cuda_allocated_bytes = torch.cuda.memory_allocated(0)
     return current_guess, log
-
-
-class Sqp:
-    def __init__(
-        self,
-        prob: Problem,
-        params: SqpParameters,
-        init_guess: Trajectory,
-    ) -> None:
-        self.prob = prob
-        self.params = params
-        self.horizon = self.prob.horizon
-
-        self.current_guess = init_guess
-
-        if self.params.ls_function == "merit":
-            # Merit function
-            self.merit_mu = self.params.merit_mu
-            self.best_phi = self.merit_(self.best_cost, self.best_constr_inf)
-
-        self.terminated = torch.zeros((self.prob.n_batch), dtype=torch.bool)
-
-    def solve(self):
-        return self.solve_(self.prob, self.params, self.current_guess)

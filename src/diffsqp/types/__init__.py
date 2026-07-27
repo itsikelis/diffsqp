@@ -1,3 +1,4 @@
-from .trajectory import Trajectory
 from .qp_parameters import QpParameters
-from .qp_solution import QpSolution
+from .admm_solution import AdmmSolution
+from .lqr_solution import LqrSolution
+from .sqp_solution import SqpSolution

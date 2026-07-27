@@ -2,10 +2,17 @@ import torch
 
 from diffsqp.problems import Problem
 from diffsqp.utils.math import mm, mv, tran
-from diffsqp.types import Trajectory, QpParameters, QpSolution
+from diffsqp.types import QpParameters, LqrSolution
 
 
-def lqr_backward_pass(problem: Problem, matrices: QpParameters):
+def lqr_solve(problem: Problem, Q, q, R, r, S, A, B, b, C, D, d):
+    K, k, P, p = lqr_backward_pass_(problem, Q, q, R, r, S, A, B, b, C, D, d)
+    qp_results = lqr_forward_pass_(problem, K, k, P, p, A, B, b)
+
+    return qp_results
+
+
+def lqr_backward_pass_(problem: Problem, Q, q, R, r, S, A, B, b, C, D, d):
     batch_size = problem.n_batch
     horizon = problem.horizon
     n_x = problem.n_x
@@ -18,22 +25,16 @@ def lqr_backward_pass(problem: Problem, matrices: QpParameters):
     P = torch.zeros((batch_size, horizon, n_x, n_x))
     p = torch.zeros((batch_size, horizon, n_x))
 
-    P[:, -1], p[:, -1] = matrices.Q[:, -1], matrices.q[:, -1]
+    P[:, -1], p[:, -1] = Q[:, -1], q[:, -1]
 
     for i in reversed(range(horizon - 1)):
-        Q_i, q_i, R_i, r_i, S_i = (
-            matrices.Q[:, i],
-            matrices.q[:, i],
-            matrices.R[:, i],
-            matrices.r[:, i],
-            matrices.S[:, i],
-        )
+        Q_i, q_i, R_i, r_i, S_i = (Q[:, i], q[:, i], R[:, i], r[:, i], S[:, i])
 
-        A_i, B_i, b_i = matrices.A[:, i], matrices.B[:, i], matrices.b[:, i]
+        A_i, B_i, b_i = A[:, i], B[:, i], b[:, i]
 
         C_i, D_i, d_i = None, None, None
         if problem.inverse_dynamics:
-            C_i, D_i, d_i = matrices.C[:, i], matrices.D[:, i], matrices.d[:, i]
+            C_i, D_i, d_i = C[:, i], D[:, i], d[:, i]
 
         (
             K[:, i],
@@ -59,7 +60,7 @@ def lqr_backward_pass(problem: Problem, matrices: QpParameters):
     return K, k, P, p
 
 
-def lqr_forward_pass(problem: Problem, K, k, P, p, A, B, b):
+def lqr_forward_pass_(problem: Problem, K, k, P, p, A, B, b):
     # TODO: Add initial state optimization as an option
     batch_size = problem.n_batch
     horizon = problem.horizon
@@ -97,7 +98,7 @@ def lqr_forward_pass(problem: Problem, K, k, P, p, A, B, b):
             b=b_i,
         )
 
-    return QpSolution(dx=dx, du=du, mu=mu, nu=nu, lam=None)
+    return LqrSolution(dx=dx, du=du, mu=mu, nu=nu)
 
 
 def lqr_step_backward_(Q, q, R, r, S, P_next, p_next, A, B, b, C=None, D=None, d=None):

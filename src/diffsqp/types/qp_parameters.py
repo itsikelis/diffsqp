@@ -14,3 +14,6 @@ class QpParameters(NamedTuple):
     C: torch.Tensor
     D: torch.Tensor
     d: torch.Tensor
+    M: torch.Tensor
+    N: torch.Tensor
+    n: torch.Tensor
