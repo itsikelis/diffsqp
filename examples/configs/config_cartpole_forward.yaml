@@ -15,7 +15,7 @@ system:
 problem:
   inverse_dynamics: False
   n_h: 0 # Number of underactuated DoFs
-  n_batch: 2 # batch size
+  n_batch: 1 # batch size
   dt: 0.01 # node dt
   tf: 1.0 # total horizon time
 
@@ -31,6 +31,13 @@ problem:
 
 solver:
   # Solver parameters
+  admm_max_iter: 10
+  admm_eps: 0.01
+  admm_alpha: 1.6
+  # admm_alpha: 1.0
+  admm_sigma: 10.0E-6
+  # admm_sigma: 0.0
+  admm_rho: 0.4
   sqp_max_iter: 500
   merit_mu: 1.0E+3
   ls_max_iter: 10

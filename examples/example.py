@@ -11,9 +11,14 @@ from diffsqp.costs import LqrCost
 from diffsqp.solvers import sqp_solve, SqpParameters
 from diffsqp.dynamics import Dynamics, AcrobotDynamics, CartPoleDynamics
 from diffsqp.dynamics import AcrobotParameters, CartPoleParameters
-from diffsqp.constraints import AcrobotUnderactuation, CartPoleUnderactuation
+from diffsqp.constraints import (
+    AcrobotUnderactuation,
+    CartPoleUnderactuation,
+    StateBounds,
+    ControlBounds,
+)
 from diffsqp.utils.animate import AcrobotAnimator, CartPoleAnimator
-from diffsqp.types import Trajectory
+from diffsqp.types import SqpSolution
 
 
 def load_config(config_path):
@@ -65,12 +70,12 @@ elif cfg["system"]["name"] == "cartpole":
 # Create problem
 print(f"Solving..")
 prob = Problem(prob_params)
-initial_guess = Trajectory(
+initial_guess = SqpSolution(
     x=torch.zeros((prob.n_batch, prob.horizon, prob.n_x)),
     u=torch.zeros((prob.n_batch, prob.horizon - 1, prob.n_u)),
     mu=torch.zeros((prob.n_batch, prob.horizon, prob.n_x)),
     nu=torch.zeros((prob.n_batch, prob.horizon - 1, prob.n_h)),
-    lam=None,
+    ksi=[None] * prob.horizon,
 )
 
 # Costs
@@ -79,9 +84,23 @@ R = prob_params.r_w * torch.eye(dyn.nu).repeat(prob_params.n_batch, 1, 1)
 Qf = prob_params.qf_w * torch.eye(dyn.nx).repeat(prob_params.n_batch, 1, 1)
 
 # Set stage costs an initial guess
-for i in range(prob.horizon - 1):
-    initial_guess.x[:, i] = prob_params.x_init.clone()
+for k in range(prob.horizon - 1):
+    initial_guess.x[:, k] = prob_params.x_init.clone()
     prob.costs.append([LqrCost(Q=Q, R=R)])
+    prob.constraints[k] = [
+        # ControlBounds(
+        #     prob.n_x,
+        #     prob.n_u,
+        #     torch.Tensor([-15]),
+        #     torch.Tensor([15]),
+        # ),
+        StateBounds(
+            prob.n_x,
+            prob.n_u,
+            torch.Tensor([-0.5]),
+            torch.Tensor([15]),
+        ),
+    ]
 # Set terminal cost
 initial_guess.x[:, -1] = prob_params.x_des.clone()
 prob.costs.append([LqrCost(Q=Qf, x_des=prob_params.x_des.clone())])
@@ -95,16 +114,9 @@ else:
 
 
 # Solve
-start = time.time()
-try:
-    solution, log = sqp_solve(prob, sqp_params, initial_guess)
-except KeyboardInterrupt:
-    print("Keyboard  Interrupt")
-end = time.time()
+solution, log = sqp_solve(prob, sqp_params, initial_guess)
 
-print(log)
-
-print("Time elapsed: ", end - start, " s.")
+print("Time elapsed: ", log.solve_wall_time_s, " s.")
 
 
 import matplotlib.pyplot as plt
@@ -146,11 +158,11 @@ def plot_controls(controls_tensor):
     plt.grid(True)
     plt.tight_layout()
     # plt.savefig("state_trajectory.png")
-    plt.show()
+   plt.show()
 
 
 # plot_states(solution.x)
-# plot_controls(solution.u)
+plot_controls(solution.u)
 
 # Animate:
 if sys_params.name == "acrobot":
