@@ -109,110 +109,117 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
     # Solve for sqp_max_iter steps
     t_solve_start = time.time()
     for iter in range(parameters.sqp_max_iter):
-        print("Iter: ", iter)
-        ## Linearize problem ##
-        regularization_scale = line_search_fails * 1e-8
-        mat = problem.linearize(current_guess, regularization_scale)
+        try:
+            print("Iter: ", iter)
+            ## Linearize problem ##
+            regularization_scale = line_search_fails * 1e-8
+            mat = problem.linearize(current_guess, regularization_scale)
 
-        # Solve the unconstrained problem
-        # admm_solution = lqr_solve(
-        #     problem,
-        #     mat.Q,
-        #     mat.q,
-        #     mat.R,
-        #     mat.r,
-        #     mat.S,
-        #     mat.A,
-        #     mat.B,
-        #     mat.b,
-        #     mat.C,
-        #     mat.D,
-        #     mat.d
-        # )
+            # Solve the unconstrained problem
+            # admm_solution = lqr_solve(
+            #     problem,
+            #     mat.Q,
+            #     mat.q,
+            #     mat.R,
+            #     mat.r,
+            #     mat.S,
+            #     mat.A,
+            #     mat.B,
+            #     mat.b,
+            #     mat.C,
+            #     mat.D,
+            #     mat.d
+            # )
 
-        # Solve the constrained problem
-        admm_solution = admm_solve(problem, parameters, mat)
+            # Solve the constrained problem
+            admm_solution = admm_solve(problem, parameters, mat)
 
-        ## Line search ##
-        # TODO: Log line search time
-        # ls_info = self.line_search_(problem, parameters, current_guess, admm_results)
-        alpha = torch.ones((batch_size))
-        dones = terminated.clone()
-        for ls_iter in range(parameters.ls_max_iter):
-            new_guess = SqpSolution(
-                x=current_guess.x + torch.einsum("b,bhj->bhj", alpha, admm_solution.dx),
-                u=current_guess.u + torch.einsum("b,bhj->bhj", alpha, admm_solution.du),
-                mu=admm_solution.mu,
-                nu=admm_solution.nu,
-                ksi=None,
-                # ksi=admm_solution.ksi,
+            ## Line search ##
+            # TODO: Log line search time
+            alpha = torch.ones((batch_size))
+            dones = terminated.clone()
+            for ls_iter in range(parameters.ls_max_iter):
+                new_guess = SqpSolution(
+                    x=current_guess.x
+                    + torch.einsum("b,bhj->bhj", alpha, admm_solution.dx),
+                    u=current_guess.u
+                    + torch.einsum("b,bhj->bhj", alpha, admm_solution.du),
+                    mu=admm_solution.mu,
+                    nu=admm_solution.nu,
+                    ksi=admm_solution.ksi,
+                )
+
+                # Evaluate current alpha
+                cost, constr_inf = problem.evaluate_guess(new_guess)
+                # Backtracking line search option
+                if parameters.ls_function == "filter":
+                    cost_improved = cost < best_cost
+                    constr_inf_improved = constr_inf < best_constr_inf
+                    update_mask = torch.logical_or(cost_improved, constr_inf_improved)
+                # Merit function option
+                elif parameters.ls_function == "merit":
+                    phi = cost + parameters.merit_mu * constr_inf
+                    update_mask = phi < best_phi
+
+                update_mask = update_mask & ~dones
+                if update_mask.any():
+                    # Update relevant variables
+                    current_guess.x[:][update_mask] = new_guess.x[:][update_mask]
+                    current_guess.u[:][update_mask] = new_guess.u[:][update_mask]
+                    current_guess.mu[:][update_mask] = new_guess.mu[:][update_mask]
+                    current_guess.nu[:][update_mask] = new_guess.nu[:][update_mask]
+                    # Mark environments as finished
+                    dones[update_mask] = True
+                    # Update best filter and merit candidates
+                    best_cost[update_mask] = cost[update_mask]
+                    best_constr_inf[update_mask] = constr_inf[update_mask]
+                    if parameters.ls_function == "merit":
+                        best_phi[update_mask] = phi[update_mask]
+
+                # Decrease alpha
+                alpha[~dones] *= 0.5
+                if torch.all(dones):
+                    # Reset line search fails
+                    line_search_fails = 0
+                    break
+
+            log.ls_iters.append(ls_iter + 1)
+            if ls_iter == parameters.ls_max_iter - 1:
+                print("Line search failed")
+                line_search_fails += 1
+
+            #######################
+            ## Check termination ##
+            #######################
+            """
+            Check the KKT conditions:
+            - ||L||_inf < eps
+            - ||dynamics(x, u) - x_next||_inf < eps
+            - ||h(x, u)||_inf < eps
+            """
+
+            ## Primal Feasibility ##
+            # Computing Lx, Lu is expensive, so we check for stationarity in dx.T @ dx, du.T @ du
+            dot_delta_x = torch.einsum(
+                "bhi,bhi->bh", admm_solution.dx, admm_solution.dx
+            )
+            dot_delta_u = torch.einsum(
+                "bhi,bhi->bh", admm_solution.du, admm_solution.du
+            )
+            dx_inf = torch.norm(dot_delta_x, p=float("inf"), dim=[1])
+            du_inf = torch.norm(dot_delta_u, p=float("inf"), dim=[1])
+            stationarity = torch.logical_and(
+                dx_inf < parameters.sqp_eps,
+                du_inf < parameters.sqp_eps,
             )
 
-            # Evaluate current alpha
-            cost, constr_inf = problem.evaluate_guess(new_guess)
-            # Backtracking line search option
-            if parameters.ls_function == "filter":
-                cost_improved = cost < best_cost
-                constr_inf_improved = constr_inf < best_constr_inf
-                update_mask = torch.logical_or(cost_improved, constr_inf_improved)
-            # Merit function option
-            elif parameters.ls_function == "merit":
-                phi = cost + parameters.merit_mu * constr_inf
-                update_mask = phi < best_phi
+            constraint_satisfaction = best_constr_inf < parameters.sqp_eps
 
-            update_mask = update_mask & ~dones
-            if update_mask.any():
-                # Update relevant variables
-                current_guess.x[:][update_mask] = new_guess.x[:][update_mask]
-                current_guess.u[:][update_mask] = new_guess.u[:][update_mask]
-                current_guess.mu[:][update_mask] = new_guess.mu[:][update_mask]
-                current_guess.nu[:][update_mask] = new_guess.nu[:][update_mask]
-                # Mark environments as finished
-                dones[update_mask] = True
-                # Update best filter and merit candidates
-                best_cost[update_mask] = cost[update_mask]
-                best_constr_inf[update_mask] = constr_inf[update_mask]
-                if parameters.ls_function == "merit":
-                    best_phi[update_mask] = phi[update_mask]
-
-            # Decrease alpha
-            alpha[~dones] *= 0.5
-            if torch.all(dones):
-                # Reset line search fails
-                line_search_fails = 0
+            # terminated = torch.logical_and(stationarity, constraint_satisfaction)
+            terminated = constraint_satisfaction
+            if terminated.all():
                 break
-
-        log.ls_iters.append(ls_iter + 1)
-        if ls_iter == parameters.ls_max_iter - 1:
-            print("Line search failed")
-            line_search_fails += 1
-
-        #######################
-        ## Check termination ##
-        #######################
-        """
-        Check the KKT conditions:
-        - ||L||_inf < eps
-        - ||dynamics(x, u) - x_next||_inf < eps
-        - ||h(x, u)||_inf < eps
-        """
-
-        ## Primal Feasibility ##
-        # Computing Lx, Lu is expensive, so we check for stationarity in dx.T @ dx, du.T @ du
-        dot_delta_x = torch.einsum("bhi,bhi->bh", admm_solution.dx, admm_solution.dx)
-        dot_delta_u = torch.einsum("bhi,bhi->bh", admm_solution.du, admm_solution.du)
-        dx_inf = torch.norm(dot_delta_x, p=float("inf"), dim=[1])
-        du_inf = torch.norm(dot_delta_u, p=float("inf"), dim=[1])
-        stationarity = torch.logical_and(
-            dx_inf < parameters.sqp_eps,
-            du_inf < parameters.sqp_eps,
-        )
-
-        constraint_satisfaction = best_constr_inf < parameters.sqp_eps
-
-        # terminated = torch.logical_and(stationarity, constraint_satisfaction)
-        terminated = constraint_satisfaction
-        if terminated.all():
+        except KeyboardInterrupt:
             break
     t_solve_end = time.time()
 
