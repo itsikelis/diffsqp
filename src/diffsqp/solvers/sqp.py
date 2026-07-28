@@ -19,7 +19,10 @@ class SqpParameters:
         self.admm_alpha: float = args["admm_alpha"]
         self.admm_sigma: float = args["admm_sigma"]
         self.admm_rho: float = args["admm_rho"]
-        self.admm_warm_start_previous: float = args["admm_warm_start_previous"]
+        self.admm_warm_start: float = args["admm_warm_start"]
+        self.admm_initialize_unconstrained: float = args[
+            "admm_initialize_unconstrained"
+        ]
 
         self.sqp_max_iter: int = args["sqp_max_iter"]
         self.merit_mu: float = args["merit_mu"]
@@ -108,6 +111,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
 
     log = SqpSolutionLog()
     admm_solution = None
+
     # Solve for sqp_max_iter steps
     t_solve_start = time.time()
     for iter in range(parameters.sqp_max_iter):
@@ -117,25 +121,28 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
             regularization_scale = line_search_fails * 1e-8
             mat = problem.linearize(current_guess, regularization_scale)
 
-            # Solve the unconstrained problem
-            # admm_solution = lqr_solve(
-            #     problem,
-            #     mat.Q,
-            #     mat.q,
-            #     mat.R,
-            #     mat.r,
-            #     mat.S,
-            #     mat.A,
-            #     mat.B,
-            #     mat.b,
-            #     mat.C,
-            #     mat.D,
-            #     mat.d
-            # )
+            if (
+                admm_solution is None
+                and parameters.admm_warm_start
+                and parameters.admm_initialize_unconstrained
+            ):
+                # Solve the unconstrained problem
+                admm_solution = lqr_solve(
+                    problem,
+                    mat.Q,
+                    mat.q,
+                    mat.R,
+                    mat.r,
+                    mat.S,
+                    mat.A,
+                    mat.B,
+                    mat.b,
+                    mat.C,
+                    mat.D,
+                    mat.d,
+                )
 
-            # Solve the constrained problem
-
-            if parameters.admm_warm_start_previous:
+            if parameters.admm_warm_start:
                 admm_solution = admm_solve(problem, parameters, mat, admm_solution)
             else:
                 admm_solution = admm_solve(problem, parameters, mat)

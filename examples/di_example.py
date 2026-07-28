@@ -42,8 +42,8 @@ sqp_parameters_dict = {
     "admm_alpha": 1.6,
     "admm_sigma": 1e-6,
     "admm_rho": 0.8,
-    "admm_warm_start_unconstrained": False,
-    "admm_warm_start_previous": False,
+    "admm_warm_start": True,
+    "admm_initialize_unconstrained": True,
     "sqp_max_iter": 100,
     "merit_mu": 1e6,
     "ls_max_iter": 10,
@@ -62,7 +62,12 @@ problem_parameters_dict = {
     "x_init": [0.0, 0.0, 0.0, 0.0],
     "noise_std": 0.0,
     "x_des": [1.0, 0.0, 0.0, 0.0],
-    # # Cost weights
+    # State-control bounds
+    "x_lb": [-1e6, -1e6, -1e6, -1e6],
+    "x_ub": [1e6, 1e6, 1e6, 1e6],
+    "u_lb": [-6.0, -6.0],
+    "u_ub": [6.0, 6.0],
+    # Cost weights
     "q_w": [1e-6, 1e-6, 1e-6, 1e-6],
     "r_w": [1e-8, 1e-8],
     "qf_w": [1e5, 1e5, 1e5, 1e5],
@@ -70,7 +75,6 @@ problem_parameters_dict = {
 problem_parameters = ProblemParameters(**problem_parameters_dict)
 
 dynamics = Dynamics(nx=4, nu=2, nq=2, nv=2)
-
 
 # Create problem
 print(f"Solving..")
@@ -102,14 +106,14 @@ for k in range(problem.horizon - 1):
         StateBounds(
             problem.n_x,
             problem.n_u,
-            torch.Tensor([-1e6, -1e6, -1e6, -1e6]),
-            torch.Tensor([1e6, 1e6, 1e6, 1e6]),
+            problem_parameters.x_lb,
+            problem_parameters.x_ub,
         ),
         ControlBounds(
             problem.n_x,
             problem.n_u,
-            torch.Tensor([-1e6, -1e6]),
-            torch.Tensor([1e6, 1e6]),
+            problem_parameters.u_lb,
+            problem_parameters.u_ub,
         ),
     ]
 # Set terminal cost

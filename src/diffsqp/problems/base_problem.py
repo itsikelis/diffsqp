@@ -28,6 +28,12 @@ class ProblemParameters:
         self.x_init[:, 0:2] += args["noise_std"] * torch.randn((self.n_batch, 2))
         self.x_des = torch.tensor(args["x_des"]).repeat(self.n_batch, 1)
 
+        # State-control bounds
+        self.x_lb = torch.tensor(args["x_lb"])
+        self.x_ub = torch.tensor(args["x_ub"])
+        self.u_lb = torch.tensor(args["u_lb"])
+        self.u_ub = torch.tensor(args["u_ub"])
+
         # # Cost weights
         self.q_w = torch.tensor(args["q_w"])
         self.r_w = torch.tensor(args["r_w"])

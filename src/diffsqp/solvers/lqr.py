@@ -2,7 +2,7 @@ import torch
 
 from diffsqp.problems import Problem
 from diffsqp.utils.math import mm, mv, tran
-from diffsqp.types import QpParameters, LqrSolution
+from diffsqp.types import QpParameters, AdmmSolution
 
 
 def lqr_solve(problem: Problem, Q, q, R, r, S, A, B, b, C, D, d):
@@ -98,7 +98,14 @@ def lqr_forward_pass_(problem: Problem, K, k, P, p, A, B, b):
             b=b_i,
         )
 
-    return LqrSolution(dx=dx, du=du, mu=mu, nu=nu)
+    return AdmmSolution(
+        dx=dx,
+        du=du,
+        mu=mu,
+        nu=nu,
+        z=[torch.zeros((batch_size, problem.n_g(k))) for k in range(horizon)],
+        ksi=[torch.zeros((batch_size, problem.n_g(k))) for k in range(horizon)],
+    )
 
 
 def lqr_step_backward_(Q, q, R, r, S, P_next, p_next, A, B, b, C=None, D=None, d=None):
