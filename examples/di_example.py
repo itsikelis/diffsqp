@@ -42,6 +42,8 @@ sqp_parameters_dict = {
     "admm_alpha": 1.6,
     "admm_sigma": 1e-6,
     "admm_rho": 0.8,
+    "admm_warm_start_unconstrained": False,
+    "admm_warm_start_previous": False,
     "sqp_max_iter": 100,
     "merit_mu": 1e6,
     "ls_max_iter": 10,
@@ -59,11 +61,11 @@ problem_parameters_dict = {
     "n_h": 0,
     "x_init": [0.0, 0.0, 0.0, 0.0],
     "noise_std": 0.0,
-    "x_des": [1.0, 1.0, 0.0, 0.0],
+    "x_des": [1.0, 0.0, 0.0, 0.0],
     # # Cost weights
-    "q_w": [1e1, 1e1, 1e-8, 1e-8],
-    "r_w": [1e-12, 1e-12],
-    "qf_w": [1e3, 1e3, 1e3, 1e3],
+    "q_w": [1e-6, 1e-6, 1e-6, 1e-6],
+    "r_w": [1e-8, 1e-8],
+    "qf_w": [1e5, 1e5, 1e5, 1e5],
 }
 problem_parameters = ProblemParameters(**problem_parameters_dict)
 
@@ -95,7 +97,7 @@ Qf = problem_parameters.qf_w * torch.eye(dynamics.nx).repeat(
 # Set stage costs an initial guess
 for k in range(problem.horizon - 1):
     initial_guess.x[:, k] = problem_parameters.x_init.clone()
-    problem.costs.append([LqrCost(Q=Q, R=R, x_des=problem_parameters.x_des.clone())])
+    problem.costs.append([LqrCost(Q=Q, R=R)])
     problem.constraints[k] = [
         StateBounds(
             problem.n_x,

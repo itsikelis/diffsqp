@@ -44,8 +44,8 @@ def check_admm_termination(parameters, admm_iter, r_prim):
         return True
 
     # print(r_prim <= parameters.admm_eps)
-    if torch.all(r_prim <= parameters.admm_eps):
-        return True
+    # if torch.all(r_prim <= parameters.admm_eps):
+    #     return True
 
     # O'Donoghue et. al. inspired termination
     # primal_residual =
@@ -83,7 +83,7 @@ def get_constrained_qp_vectors(
     return q_k_, r_k_
 
 
-def admm_solve(problem, parameters, mat):
+def admm_solve(problem, parameters, mat, previous_solution=None):
     batch_size = problem.n_batch
     horizon = problem.horizon
     n_x = problem.n_x
@@ -96,18 +96,20 @@ def admm_solve(problem, parameters, mat):
     sigma = parameters.admm_sigma
     rho_changed = True
 
-    # TODO: Add admm solution warmstarting option
-    admm_solution = AdmmSolution(
-        dx=torch.zeros((batch_size, horizon, n_x)),
-        du=torch.zeros((batch_size, horizon - 1, n_u)),
-        mu=torch.zeros((batch_size, horizon, n_x)),
-        nu=torch.zeros((batch_size, horizon - 1, n_h)),
-        z=[torch.zeros((batch_size, problem.n_g(k))) for k in range(horizon)],
-        ksi=[torch.zeros((batch_size, problem.n_g(k))) for k in range(horizon)],
-    )
+    if previous_solution is None:
+        admm_solution = AdmmSolution(
+            dx=torch.zeros((batch_size, horizon, n_x)),
+            du=torch.zeros((batch_size, horizon - 1, n_u)),
+            mu=torch.zeros((batch_size, horizon, n_x)),
+            nu=torch.zeros((batch_size, horizon - 1, n_h)),
+            z=[torch.zeros((batch_size, problem.n_g(k))) for k in range(horizon)],
+            ksi=[torch.zeros((batch_size, problem.n_g(k))) for k in range(horizon)],
+        )
+    else:
+        admm_solution = previous_solution
 
     for admm_iter in range(parameters.admm_max_iter):
-        # print("ADMM Iter: ", admm_iter)
+        print("ADMM Iter: ", admm_iter)
 
         r_prim = -float("inf") * torch.ones((batch_size))
         r_dual = -float("inf") * torch.ones((batch_size))

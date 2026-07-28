@@ -19,6 +19,7 @@ class SqpParameters:
         self.admm_alpha: float = args["admm_alpha"]
         self.admm_sigma: float = args["admm_sigma"]
         self.admm_rho: float = args["admm_rho"]
+        self.admm_warm_start_previous: float = args["admm_warm_start_previous"]
 
         self.sqp_max_iter: int = args["sqp_max_iter"]
         self.merit_mu: float = args["merit_mu"]
@@ -106,6 +107,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
         best_phi = best_cost + parameters.merit_mu * best_constr_inf
 
     log = SqpSolutionLog()
+    admm_solution = None
     # Solve for sqp_max_iter steps
     t_solve_start = time.time()
     for iter in range(parameters.sqp_max_iter):
@@ -132,7 +134,11 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
             # )
 
             # Solve the constrained problem
-            admm_solution = admm_solve(problem, parameters, mat)
+
+            if parameters.admm_warm_start_previous:
+                admm_solution = admm_solve(problem, parameters, mat, admm_solution)
+            else:
+                admm_solution = admm_solve(problem, parameters, mat)
 
             ## Line search ##
             # TODO: Log line search time
