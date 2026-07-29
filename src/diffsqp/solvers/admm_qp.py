@@ -48,9 +48,6 @@ def check_admm_termination(parameters, admm_iter, r_prim_x, r_prim_u):
     ):
         return True
 
-    # primal_residual =
-    # dual_residual =
-
     return False
 
 
@@ -83,7 +80,7 @@ def get_constrained_qp_vectors(
     return q_k_, r_k_
 
 
-def admm_solve(problem, parameters, mat, previous_solution=None):
+def admm_qp_solve(problem, parameters, mat, previous_solution=None):
     batch_size = problem.n_batch
     horizon = problem.horizon
     n_x = problem.n_x
@@ -232,21 +229,18 @@ def admm_solve(problem, parameters, mat, previous_solution=None):
             # r_dual_x = |rho * (Q * dx + S^T * du + q - M^T * ksi)| #
             # r_dual_u = |rho * (R * du + S * dx + r - N^T * ksi)|   #
             # ------------------------------------------------------ #
-            r_dual_x_k = torch.einsum("...ij,...j->...i", Q_k, dx_k)
-            if k < horizon - 1:
-                r_dual_x_k += torch.einsum("...ij,...i->...j", S_k, du_k)
-            r_dual_x_k += q_k
-            r_dual_x_k -= torch.einsum("...ij,...i->...j", M_k, ksi_k)
-
-            # print(torch.norm(r_dual_x_k, p=float("inf"), dim=1))
-
-            if k < horizon - 1:
-                r_dual_u_k = torch.einsum("...ij,...j->...i", R_k, du_k)
-                r_dual_u_k += torch.einsum("...ij,...j->...i", S_k, dx_k)
-                r_dual_u_k += r_k
-                r_dual_u_k -= torch.einsum("...ij,...i->...j", N_k, -ksi_k)
+            # r_dual_x_k = torch.einsum("...ij,...j->...i", Q_k, dx_k)
+            # if k < horizon - 1:
+            #     r_dual_x_k += torch.einsum("...ij,...i->...j", S_k, du_k)
+            # r_dual_x_k += q_k
+            # r_dual_x_k -= torch.einsum("...ij,...i->...j", M_k, ksi_k)
+            #
+            # if k < horizon - 1:
+            #     r_dual_u_k = torch.einsum("...ij,...j->...i", R_k, du_k)
+            #     r_dual_u_k += torch.einsum("...ij,...j->...i", S_k, dx_k)
+            #     r_dual_u_k += r_k
+            #     r_dual_u_k -= torch.einsum("...ij,...i->...j", N_k, -ksi_k)
 
         # Check ADMM termination
-        # print(r_prim)
         if check_admm_termination(parameters, admm_iter, r_prim_x, r_prim_u):
             return admm_solution

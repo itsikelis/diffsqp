@@ -7,7 +7,7 @@ from typing import List
 
 from diffsqp.problems import Problem, ProblemParameters
 from diffsqp.solvers import QP
-from diffsqp.solvers import admm_solve, lqr_solve
+from diffsqp.solvers import admm_qp_solve, lqr_solve
 from dataclasses import dataclass
 from diffsqp.types import SqpSolution, AdmmSolution, LqrSolution
 
@@ -130,9 +130,9 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                 admm_solution = lqr_solve(problem, mat)
 
             if parameters.admm_warm_start:
-                admm_solution = admm_solve(problem, parameters, mat, admm_solution)
+                admm_solution = admm_qp_solve(problem, parameters, mat, admm_solution)
             else:
-                admm_solution = admm_solve(problem, parameters, mat)
+                admm_solution = admm_qp_solve(problem, parameters, mat)
 
             ## Line search ##
             # TODO: Log line search time
