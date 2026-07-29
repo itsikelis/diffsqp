@@ -5,7 +5,7 @@ from diffsqp.utils.math import mm, mv, tran
 from diffsqp.types import QpParameters, AdmmSolution
 
 
-def lqr_solve(problem: Problem, Q, q, R, r, S, A, B, b, C, D, d):
+def lqr_solve(problem: Problem, mat):
     K, k, P, p = lqr_backward_pass_(
         problem,
         mat.Q,

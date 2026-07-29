@@ -38,16 +38,16 @@ def get_constrained_qp_matrices(Q_k, R_k, S_k, M_k, N_k, Diag_rho, sigma):
     return Q_k_, R_k_, S_k_
 
 
-def check_admm_termination(parameters, admm_iter, r_prim):
+def check_admm_termination(parameters, admm_iter, r_prim_x, r_prim_u):
     # Maximum iterations reached
     if admm_iter == parameters.admm_max_iter - 1:
         return True
 
-    # print(r_prim <= parameters.admm_eps)
-    # if torch.all(r_prim <= parameters.admm_eps):
-    #     return True
+    if torch.all(r_prim_x <= parameters.admm_eps) and torch.all(
+        r_prim_u <= parameters.admm_eps
+    ):
+        return True
 
-    # O'Donoghue et. al. inspired termination
     # primal_residual =
     # dual_residual =
 
@@ -111,7 +111,8 @@ def admm_solve(problem, parameters, mat, previous_solution=None):
     for admm_iter in range(parameters.admm_max_iter):
         print("ADMM Iter: ", admm_iter)
 
-        r_prim = -float("inf") * torch.ones((batch_size))
+        r_prim_x = -float("inf") * torch.ones((batch_size))
+        r_prim_u = -float("inf") * torch.ones((batch_size))
         r_dual = -float("inf") * torch.ones((batch_size))
 
         # TODO: Add rho_changed option
@@ -151,13 +152,13 @@ def admm_solve(problem, parameters, mat, previous_solution=None):
             alpha = parameters.admm_alpha
             lb, ub = problem.g_bounds(k)
 
-            dx_hat = lqr_solution.dx[:, k]
+            dx_hat_k = lqr_solution.dx[:, k]
             M_k = mat.M[k]
             Q_k = mat.Q[:, k]
             q_k = mat.q[:, k]
 
             if k < horizon - 1:
-                du_hat = lqr_solution.du[:, k]
+                du_hat_k = lqr_solution.du[:, k]
                 N_k = mat.N[k]
                 R_k = mat.R[:, k]
                 r_k = mat.r[:, k]
@@ -167,14 +168,14 @@ def admm_solve(problem, parameters, mat, previous_solution=None):
             # dx = alpha * dx_hat + (1-alpha) * dx  #
             # ------------------------------------- #
             admm_solution.dx[:, k] *= 1.0 - alpha
-            admm_solution.dx[:, k] += alpha * dx_hat
+            admm_solution.dx[:, k] += alpha * dx_hat_k
 
             # ------------------------------------- #
             # du = alpha * du_hat + (1-alpha) * du  #
             # ------------------------------------- #
             if k < horizon - 1:
                 admm_solution.du[:, k] *= 1.0 - alpha
-                admm_solution.du[:, k] += alpha * du_hat
+                admm_solution.du[:, k] += alpha * du_hat_k
 
             # If no generic stage constraints -> continue
             if M_k is None:
@@ -183,9 +184,9 @@ def admm_solve(problem, parameters, mat, previous_solution=None):
             # --------------------------------------------------------- #
             # z_hat = alpha * (M * dx_hat + N * du_hat) + (1-alpha) * z #
             # --------------------------------------------------------- #
-            z_hat = torch.einsum("...ij,...j->...i", M_k, dx_hat)
+            z_hat = torch.einsum("...ij,...j->...i", M_k, dx_hat_k)
             if k < horizon - 1:
-                z_hat += torch.einsum("...ij,...j->...i", N_k, du_hat)
+                z_hat += torch.einsum("...ij,...j->...i", N_k, du_hat_k)
             z_hat *= alpha
             z_hat += (1.0 - alpha) * (admm_solution.z[k])
 
@@ -203,22 +204,29 @@ def admm_solve(problem, parameters, mat, previous_solution=None):
                 z_hat - admm_solution.z[k]
             )
 
-            # Calculate residuals
+            ## O'Donoghue et. al. inspired termination residuals ##
             dx_k = admm_solution.dx[:, k]
-            du_k = admm_solution.du[:, k]
+            dx_hat_k = lqr_solution.dx[:, k]
+            if k < horizon - 1:
+                du_k = admm_solution.du[:, k]
+                du_hat_k = lqr_solution.du[:, k]
+
             ksi_k = admm_solution.ksi[k]
 
-            # -----------------------------  #
-            # r_prim = |M * dx + N * du - z| #
-            # -----------------------------  #
-            r_prim_k = torch.einsum("...ij,...j->...i", M_k, dx_k)
+            # ---------------------------- #
+            # r_prim_x = |dx - dx_hat|_inf #
+            # r_prim_u = |du - du_hat|_inf #
+            # ---------------------------- #
+            r_prim_x_k = dx_k - dx_hat_k
+            r_prim_x_k = torch.norm(r_prim_x_k, p=float("inf"), dim=1)
+
             if k < horizon - 1:
-                r_prim_k += torch.einsum("...ij,...j->...i", N_k, du_k)
-            r_prim_k -= admm_solution.z[k]
-            r_prim_k = torch.norm(r_prim_k, p=float("inf"), dim=1)
+                r_prim_u_k = du_k - du_hat_k
+                r_prim_u_k = torch.norm(r_prim_u_k, p=float("inf"), dim=1)
 
             # Store largest residual overall
-            r_prim = torch.maximum(r_prim, r_prim_k)
+            r_prim_x = torch.maximum(r_prim_x, r_prim_x_k)
+            r_prim_u = torch.maximum(r_prim_u, r_prim_u_k)
 
             # ------------------------------------------------------ #
             # r_dual_x = |rho * (Q * dx + S^T * du + q - M^T * ksi)| #
@@ -240,5 +248,5 @@ def admm_solve(problem, parameters, mat, previous_solution=None):
 
         # Check ADMM termination
         # print(r_prim)
-        if check_admm_termination(parameters, admm_iter, r_prim):
+        if check_admm_termination(parameters, admm_iter, r_prim_x, r_prim_u):
             return admm_solution
