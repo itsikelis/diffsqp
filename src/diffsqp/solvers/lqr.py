@@ -6,10 +6,32 @@ from diffsqp.types import QpParameters, AdmmSolution
 
 
 def lqr_solve(problem: Problem, Q, q, R, r, S, A, B, b, C, D, d):
-    K, k, P, p = lqr_backward_pass_(problem, Q, q, R, r, S, A, B, b, C, D, d)
-    qp_results = lqr_forward_pass_(problem, K, k, P, p, A, B, b)
+    K, k, P, p = lqr_backward_pass_(
+        problem,
+        mat.Q,
+        mat.q,
+        mat.R,
+        mat.r,
+        mat.S,
+        mat.A,
+        mat.B,
+        mat.b,
+        mat.C,
+        mat.D,
+        mat.d,
+    )
+    result = lqr_forward_pass_(
+        problem,
+        K,
+        k,
+        P,
+        p,
+        mat.A,
+        mat.B,
+        mat.b,
+    )
 
-    return qp_results
+    return result
 
 
 def lqr_backward_pass_(problem: Problem, Q, q, R, r, S, A, B, b, C, D, d):

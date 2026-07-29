@@ -144,20 +144,7 @@ def admm_solve(problem, parameters, mat, previous_solution=None):
             )
 
         # Solve LQR to get dx_hat, du_hat
-        lqr_solution = lqr_solve(
-            problem,
-            mat.Q,
-            mat.q,
-            mat.R,
-            mat.r,
-            mat.S,
-            mat.A,
-            mat.B,
-            mat.b,
-            mat.C,
-            mat.D,
-            mat.d,
-        )
+        lqr_solution = lqr_solve(problem, mat)
 
         # ADMM step
         for k in range(horizon):

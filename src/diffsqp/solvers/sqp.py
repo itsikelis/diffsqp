@@ -127,20 +127,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                 and parameters.admm_initialize_unconstrained
             ):
                 # Solve the unconstrained problem
-                admm_solution = lqr_solve(
-                    problem,
-                    mat.Q,
-                    mat.q,
-                    mat.R,
-                    mat.r,
-                    mat.S,
-                    mat.A,
-                    mat.B,
-                    mat.b,
-                    mat.C,
-                    mat.D,
-                    mat.d,
-                )
+                admm_solution = lqr_solve(problem, mat)
 
             if parameters.admm_warm_start:
                 admm_solution = admm_solve(problem, parameters, mat, admm_solution)
