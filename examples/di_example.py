@@ -34,8 +34,6 @@ def load_config(config_path):
     return data
 
 
-## Double Integrator Dynamcics Object
-
 sqp_parameters_dict = {
     "admm_max_iter": 50,
     "admm_eps": 0.01,

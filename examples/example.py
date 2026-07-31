@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import argparse
 import torch
@@ -88,17 +89,17 @@ for k in range(prob.horizon - 1):
     initial_guess.x[:, k] = prob_params.x_init.clone()
     prob.costs.append([LqrCost(Q=Q, R=R)])
     prob.constraints[k] = [
-        # ControlBounds(
-        #     prob.n_x,
-        #     prob.n_u,
-        #     torch.Tensor([-15]),
-        #     torch.Tensor([15]),
-        # ),
         StateBounds(
             prob.n_x,
             prob.n_u,
-            torch.Tensor([-0.5]),
-            torch.Tensor([15]),
+            prob_params.x_lb,
+            prob_params.x_ub,
+        ),
+        ControlBounds(
+            prob.n_x,
+            prob.n_u,
+            prob_params.u_lb,
+            prob_params.u_ub,
         ),
     ]
 # Set terminal cost
@@ -158,11 +159,11 @@ def plot_controls(controls_tensor):
     plt.grid(True)
     plt.tight_layout()
     # plt.savefig("state_trajectory.png")
-   plt.show()
+    plt.show()
 
 
 # plot_states(solution.x)
-plot_controls(solution.u)
+# plot_controls(solution.u)
 
 # Animate:
 if sys_params.name == "acrobot":

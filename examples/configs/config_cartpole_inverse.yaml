@@ -24,6 +24,12 @@ problem:
   x_des: [0.0, 3.14159, 0.0, 0.0]
   noise_std: 0.0 # initial state noise std
 
+  # State-control bounds
+  x_lb: [-1.0E+6, -1.0E+6, -1.0E+6, -1.0E+6]
+  x_ub: [1.0E+6, 1.0E+6, 1.0E+6, 1.0E+6]
+  u_lb: [-1.0E+6, -1.0E+6]
+  u_ub: [1.0E+6, 1.0E+6]
+
   # Cost weights
   q_w: [1.0E-6, 1.0E-6, 1.0E-6, 1.0E-6]
   r_w: [1.0E-3, 1.0E-3]
@@ -31,11 +37,13 @@ problem:
 
 solver:
   # Solver parameters
-  admm_max_iter: 10
+  admm_max_iter: 50
   admm_eps: 0.01
   admm_alpha: 1.6
   admm_sigma: 1.0E-6
   admm_rho: 0.1
+  admm_warm_start: False
+  admm_initialize_unconstrained: False
   sqp_max_iter: 500
   merit_mu: 1.0E+6
   ls_max_iter: 10
