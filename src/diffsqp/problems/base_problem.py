@@ -39,6 +39,28 @@ class ProblemParameters:
         self.r_w = torch.tensor(args["r_w"])
         self.qf_w = torch.tensor(args["qf_w"])
 
+    def __str__(self) -> str:
+        return (
+            f"=== Problem Parameters ===\n"
+            f"  Inv Dynamics            : {self.inverse_dynamics}\n"
+            f"  Batch Size              : {self.n_batch}\n"
+            f"  Final Time (tf)         : {self.tf:.3f}\n"
+            f"  Time Step (dt)          : {self.dt:.4f}\n"
+            f"  Horizon Steps           : {self.horizon}\n"
+            f"  State Dim (nx)          : {self.n_x}\n"
+            f"  Control Dim (nu)        : {self.n_u}\n"
+            f"  Underactuation Dim (nh) : {self.n_h}\n"
+            f"--------------------------\n"
+            f"  State bounds (lower)    : {self.x_lb}\n"
+            f"  State bounds (upper)    : {self.x_ub}\n"
+            f"  Control bounds (lower)  : {self.u_lb}\n"
+            f"  Control bounds (lower)  : {self.u_ub}\n"
+            f"--------------------------\n"
+            f"  Initial state           : {self.x_init}\n"
+            f"  Desired state           : {self.x_des}\n"
+            f"=========================="
+        )
+
 
 class Problem(ABC):
     """

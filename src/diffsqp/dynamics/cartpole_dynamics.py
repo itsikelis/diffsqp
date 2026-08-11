@@ -22,6 +22,23 @@ class CartPoleParameters:
 
         self.grav: float = args["grav"]
 
+    def __str__(self) -> str:
+        return (
+            f"=== CartPole Parameters ===\n"
+            f"  Name            : {self.name}\n"
+            f"  State Dim (nx)  : {self.n_x}\n"
+            f"  Pos Dim (nq)    : {self.n_q}\n"
+            f"  Vel Dim (nv)    : {self.n_v}\n"
+            f"  Joints (nj)     : {self.n_j}\n"
+            f"  Control Dim (nu): {self.n_u}\n"
+            f"------------------\n"
+            f"  Cart Mass (mc)  : {self.mc:.3f}\n"
+            f"  Pole Mass (mp)  : {self.mp:.3f}\n"
+            f"  Pole Length (lp): {self.lp:.3f}\n"
+            f"  Gravity (grav)  : {self.grav:.3f}\n"
+            f"==========================="
+        )
+
 
 class CartPoleDynamics(Dynamics):
     def __init__(self, params: CartPoleParameters):

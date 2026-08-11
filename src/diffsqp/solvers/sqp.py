@@ -34,11 +34,11 @@ class SqpParameters:
     def __str__(self) -> str:
         return (
             f"=== SQP Parameters ===\n"
-            f"  QP Solver       : {self.qp_solver}\n"
-            f"  Line Search Fn  : {self.ls_function}\n"
-            f"  SQP Max Iter    : {self.sqp_max_iter}\n"
-            f"  Line Search Max : {self.ls_max_iter}\n"
-            f"  SQP Tolerance   : {self.sqp_eps:.2e}\n"
+            f" QP Solver       : {self.qp_solver}\n"
+            f" Line Search Fn  : {self.ls_function}\n"
+            f" SQP Max Iter    : {self.sqp_max_iter}\n"
+            f" Line Search Max : {self.ls_max_iter}\n"
+            f" SQP Tolerance   : {self.sqp_eps:.2e}\n"
             f"======================"
         )
 
@@ -54,6 +54,7 @@ class SqpSolutionLog:
         self.sqp_iterations: int = 0
 
         self.termination_time_s: float = 0.0
+        self.admm_iters: List[float] = []
         self.ls_iters: List[float] = []
         self.ls_alphas: List[float] = []
 
@@ -70,22 +71,24 @@ class SqpSolutionLog:
         conv_error_str = ", ".join([f"{a:.2e}" for a in self.constraint_violation[-5:]])
         if len(self.constraint_violation) > 5:
             conv_error_str = f"... {conv_error_str}"
-        iters_str = ", ".join([f"{a}" for a in self.ls_iters[:]])
+        admm_iters_str = ", ".join([f"{a}" for a in self.admm_iters[:]])
+        ls_iters_str = ", ".join([f"{a}" for a in self.ls_iters[:]])
         alphas_str = ", ".join([f"{a:.4f}" for a in self.ls_alphas[-5:]])
         if len(self.ls_alphas) > 5:
             alphas_str = f"... {alphas_str}"
 
         return (
             f"=== SQP Solution Log ===\n"
-            f"  Envs Terminated    : {self.envs_terminated}\n"
-            f"  Iterations         : {self.sqp_iterations}\n"
-            f"  Total Cost         : [{cost_str}]\n"
-            f"  Conv. Error        : [{conv_error_str}]\n"
-            f"  Solve Time         : {self.termination_time_s:.4f} s\n"
-            f"  Line Search Iters  : [{iters_str}]\n"
-            # f"  Line Search Alphas : [{alphas_str}]\n"
-            f"  CUDA Allocated     : {cuda_alc_mb:.2f} MB\n"
-            f"  CUDA Reserved      :  {cuda_res_mb:.2f} MB\n"
+            f" Envs Terminated        : {self.envs_terminated}\n"
+            f" Iterations             : {self.sqp_iterations}\n"
+            f" Total Cost             : [{cost_str}]\n"
+            f" Conv. Error            : [{conv_error_str}]\n"
+            f" Solve Time             : {self.termination_time_s:.4f} s\n"
+            f" ADMM Iterations        : [{admm_iters_str}]\n"
+            f" Line Search Iterations : [{ls_iters_str}]\n"
+            # f" Line Search Alphas : [{alphas_str}]\n"
+            f" CUDA Allocated         : {cuda_alc_mb:.2f} MB\n"
+            f" CUDA Reserved          :  {cuda_res_mb:.2f} MB\n"
             f"========================="
         )
 
@@ -109,14 +112,13 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
         merit_mu = parameters.merit_mu
         best_phi = best_cost + parameters.merit_mu * best_constr_inf
 
-    log = SqpSolutionLog()
+    sqp_log = SqpSolutionLog()
     admm_solution = None
 
     # Solve for sqp_max_iter steps
     t_solve_start = time.time()
     for iter in range(parameters.sqp_max_iter):
         try:
-            print("Iter: ", iter)
             ## Linearize problem ##
             regularization_scale = line_search_fails * 1e-8
             mat = problem.linearize(current_guess, regularization_scale)
@@ -127,12 +129,17 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                 and parameters.admm_initialize_unconstrained
             ):
                 # Solve the unconstrained problem
-                admm_solution = lqr_solve(problem, mat)
+                admm_solution, admm_log = lqr_solve(problem, mat)
 
             if parameters.admm_warm_start:
-                admm_solution = admm_qp_solve(problem, parameters, mat, admm_solution)
+                admm_solution, admm_log = admm_qp_solve(
+                    problem, parameters, mat, admm_solution
+                )
             else:
-                admm_solution = admm_qp_solve(problem, parameters, mat)
+                admm_solution, admm_log = admm_qp_solve(problem, parameters, mat)
+
+            # Log admm iterations
+            sqp_log.admm_iters.append(admm_log.iterations)
 
             ## Line search ##
             # TODO: Log line search time
@@ -183,7 +190,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                     line_search_fails = 0
                     break
 
-            log.ls_iters.append(ls_iter + 1)
+            sqp_log.ls_iters.append(ls_iter + 1)
             if ls_iter == parameters.ls_max_iter - 1:
                 print("Line search failed")
                 line_search_fails += 1
@@ -226,12 +233,12 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
     ##############
     ## Fill log ##
     ##############
-    log.solve_wall_time_s = t_solve_end - t_solve_start
-    log.sqp_iterations = iter + 1
-    log.envs_terminated = torch.count_nonzero(terminated).item()
-    log.total_cost = best_cost.tolist()
-    log.constraint_violation = best_constr_inf
+    sqp_log.solve_wall_time_s = t_solve_end - t_solve_start
+    sqp_log.sqp_iterations = iter + 1
+    sqp_log.envs_terminated = torch.count_nonzero(terminated).item()
+    sqp_log.total_cost = best_cost.tolist()
+    sqp_log.constraint_violation = best_constr_inf
     if torch.get_default_device() != "cpu":
-        log.cuda_reserved_bytes = torch.cuda.memory_reserved(0)
-        log.cuda_allocated_bytes = torch.cuda.memory_allocated(0)
-    return current_guess, log
+        sqp_log.cuda_reserved_bytes = torch.cuda.memory_reserved(0)
+        sqp_log.cuda_allocated_bytes = torch.cuda.memory_allocated(0)
+    return current_guess, sqp_log

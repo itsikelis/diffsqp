@@ -43,7 +43,6 @@ print(f"Loading problem configuration from: {args.config}")
 cfg = load_config(args.config)
 print(f"Successfully loaded parameters:")
 sqp_params = SqpParameters(**cfg["solver"])
-print(sqp_params)
 prob_params = ProblemParameters(**cfg["problem"])
 
 if cfg["system"]["name"] == "acrobot":
@@ -67,6 +66,10 @@ elif cfg["system"]["name"] == "cartpole":
         uact = CartPoleUnderactuation(sys_params)
     else:
         dyn = CartPoleDynamics(sys_params)
+
+print(sqp_params)
+print(prob_params)
+print(sys_params)
 
 # Create problem
 print(f"Solving..")
@@ -113,12 +116,10 @@ if prob_params.inverse_dynamics:
 else:
     prob.dynamics = dyn
 
-
 # Solve
 solution, log = sqp_solve(prob, sqp_params, initial_guess)
 
 print("Time elapsed: ", log.solve_wall_time_s, " s.")
-
 
 import matplotlib.pyplot as plt
 
@@ -162,8 +163,8 @@ def plot_controls(controls_tensor):
     plt.show()
 
 
-# plot_states(solution.x)
-# plot_controls(solution.u)
+plot_states(solution.x)
+plot_controls(solution.u)
 
 # Animate:
 if sys_params.name == "acrobot":

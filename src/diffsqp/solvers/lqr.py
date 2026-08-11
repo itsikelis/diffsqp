@@ -55,7 +55,7 @@ def lqr_backward_pass_(problem: Problem, Q, q, R, r, S, A, B, b, C, D, d):
         A_i, B_i, b_i = A[:, i], B[:, i], b[:, i]
 
         C_i, D_i, d_i = None, None, None
-        if problem.inverse_dynamics:
+        if problem.n_h != 0:
             C_i, D_i, d_i = C[:, i], D[:, i], d[:, i]
 
         (

@@ -20,20 +20,6 @@ from diffsqp.constraints import (
 from diffsqp.utils.animate import AcrobotAnimator, CartPoleAnimator
 from diffsqp.types import SqpSolution
 
-
-def load_config(config_path):
-    if not os.path.exists(config_path):
-        print(f"Error: Configuration file '{config_path}' not found.")
-        sys.exit(1)
-    with open(config_path, "r") as f:
-        try:
-            data = yaml.safe_load(f)
-        except yaml.YAMLError as exc:
-            print(f"Error parsing YAML file: {exc}")
-            sys.exit(1)
-    return data
-
-
 sqp_parameters_dict = {
     "admm_max_iter": 50,
     "admm_eps": 0.01,
@@ -212,7 +198,6 @@ def plot_trajectories(states_tensor, controls_tensor):
     # plt.savefig("constrained.png")
 
 
-# You can now call it like this:
 plot_trajectories(solution.x, solution.u)
 
 exit()

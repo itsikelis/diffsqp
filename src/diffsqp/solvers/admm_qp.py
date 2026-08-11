@@ -3,7 +3,7 @@ from copy import copy
 
 from diffsqp.solvers import lqr_solve
 
-from diffsqp.types import AdmmSolution
+from diffsqp.types import AdmmSolution, AdmmLog
 
 
 def get_constrained_qp_matrices(Q_k, R_k, S_k, M_k, N_k, Diag_rho, sigma):
@@ -106,8 +106,6 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
         admm_solution = previous_solution
 
     for admm_iter in range(parameters.admm_max_iter):
-        print("ADMM Iter: ", admm_iter)
-
         r_prim_x = -float("inf") * torch.ones((batch_size))
         r_prim_u = -float("inf") * torch.ones((batch_size))
         r_dual = -float("inf") * torch.ones((batch_size))
@@ -243,4 +241,8 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
 
         # Check ADMM termination
         if check_admm_termination(parameters, admm_iter, r_prim_x, r_prim_u):
-            return admm_solution
+            log = AdmmLog(
+                rho=rho,
+                iterations=admm_iter + 1,
+            )
+            return admm_solution, log
