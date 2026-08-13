@@ -136,7 +136,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
 
             ## Line search ##
             alpha = torch.ones((batch_size))
-            dones = terminated.clone()
+            dones = terminated.detach().clone()
             for ls_iter in range(parameters.ls_max_iter):
                 new_guess = SqpSolution(
                     x=current_guess.x

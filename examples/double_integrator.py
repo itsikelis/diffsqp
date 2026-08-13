@@ -101,8 +101,8 @@ for k in range(problem.horizon - 1):
         ),
     ]
 # Set terminal cost
-initial_guess.x[:, -1] = problem_parameters.x_des.clone()
-problem.costs.append([LqrCost(Q=Qf, x_des=problem_parameters.x_des.clone())])
+initial_guess.x[:, -1] = problem_parameters.x_des.detach().clone()
+problem.costs.append([LqrCost(Q=Qf, x_des=problem_parameters.x_des.detach().clone())])
 
 # Dynamics Constraints
 problem.dynamics = dynamics

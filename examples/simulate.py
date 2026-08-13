@@ -53,16 +53,16 @@ x = prob_params.x_init
 u = torch.zeros((nB, sys_params.n_u))
 
 # 3. Storage for results
-state_history = [x.clone().numpy()]
-control_history = [u.clone().numpy()]
+state_history = [x.detach().clone().numpy()]
+control_history = [u.detach().clone().numpy()]
 time_history = [0.0]
 
 # 4. Simulation Loop
 for i in range(steps):
     x = model.f(x, u, dt)
 
-    state_history.append(x.clone().numpy())
-    control_history.append(u.clone().numpy())
+    state_history.append(x.detach().clone().numpy())
+    control_history.append(u.detach().clone().numpy())
     time_history.append((i + 1) * dt)
 
 

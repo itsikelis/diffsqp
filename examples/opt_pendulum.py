@@ -31,7 +31,7 @@ for i in range(horizon - 1):
 
 # Set terminal cost
 # prob.states.append(torch.zeros((nB, nx)))
-prob.states[-1] = x_des.clone()
+prob.states[-1] = x_des.detach().clone()
 prob.costs.append([LqrCost(Q=Qf, x_des=x_des)])
 
 # Create solver object

@@ -89,7 +89,7 @@ Qf = prob_params.qf_w * torch.eye(dyn.nx).repeat(prob_params.batch_size, 1, 1)
 
 # Set stage costs an initial guess
 for k in range(prob.horizon - 1):
-    initial_guess.x[:, k] = prob_params.x_init.clone()
+    initial_guess.x[:, k] = prob_params.x_init.detach().clone()
     prob.costs.append([LqrCost(Q=Q, R=R)])
     prob.constraints[k] = [
         StateBounds(
@@ -106,8 +106,8 @@ for k in range(prob.horizon - 1):
         ),
     ]
 # Set terminal cost
-initial_guess.x[:, -1] = prob_params.x_des.clone()
-prob.costs.append([LqrCost(Q=Qf, x_des=prob_params.x_des.clone())])
+initial_guess.x[:, -1] = prob_params.x_des.detach().clone()
+prob.costs.append([LqrCost(Q=Qf, x_des=prob_params.x_des.detach().clone())])
 
 # Constraints
 if prob_params.inverse_dynamics:

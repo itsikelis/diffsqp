@@ -106,6 +106,7 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
         admm_solution = previous_solution
 
     for admm_iter in range(parameters.admm_max_iter):
+        # Max residual values
         r_prim_x = -float("inf") * torch.ones((batch_size))
         r_prim_u = -float("inf") * torch.ones((batch_size))
         r_dual = -float("inf") * torch.ones((batch_size))
