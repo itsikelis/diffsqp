@@ -75,17 +75,17 @@ print(sys_params)
 print(f"Solving..")
 prob = Problem(prob_params)
 initial_guess = SqpSolution(
-    x=torch.zeros((prob.n_batch, prob.horizon, prob.n_x)),
-    u=torch.zeros((prob.n_batch, prob.horizon - 1, prob.n_u)),
-    mu=torch.zeros((prob.n_batch, prob.horizon, prob.n_x)),
-    nu=torch.zeros((prob.n_batch, prob.horizon - 1, prob.n_h)),
+    x=torch.zeros((prob.batch_size, prob.horizon, prob.n_x)),
+    u=torch.zeros((prob.batch_size, prob.horizon - 1, prob.n_u)),
+    mu=torch.zeros((prob.batch_size, prob.horizon, prob.n_x)),
+    nu=torch.zeros((prob.batch_size, prob.horizon - 1, prob.n_h)),
     ksi=[None] * prob.horizon,
 )
 
 # Costs
-Q = prob_params.q_w * torch.eye(dyn.nx).repeat(prob_params.n_batch, 1, 1)
-R = prob_params.r_w * torch.eye(dyn.nu).repeat(prob_params.n_batch, 1, 1)
-Qf = prob_params.qf_w * torch.eye(dyn.nx).repeat(prob_params.n_batch, 1, 1)
+Q = prob_params.q_w * torch.eye(dyn.nx).repeat(prob_params.batch_size, 1, 1)
+R = prob_params.r_w * torch.eye(dyn.nu).repeat(prob_params.batch_size, 1, 1)
+Qf = prob_params.qf_w * torch.eye(dyn.nx).repeat(prob_params.batch_size, 1, 1)
 
 # Set stage costs an initial guess
 for k in range(prob.horizon - 1):
@@ -173,14 +173,14 @@ if sys_params.name == "acrobot":
         sys_params.l1,
         sys_params.l2,
         prob_params.dt,
-        prob_params.n_batch,
+        prob_params.batch_size,
     )
 elif sys_params.name == "cartpole":
     anim = CartPoleAnimator(
         solution.x,
         sys_params.lp,
         prob_params.dt,
-        prob_params.n_batch,
+        prob_params.batch_size,
     )
 
 anim.animate(step_size=2)

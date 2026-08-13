@@ -64,11 +64,11 @@ def plot_trajectories(states_tensor, controls_tensor):
 
 
 sqp_parameters_dict = {
-    "admm_max_iter": 250,
+    "admm_max_iter": 50,
     "admm_eps": 0.01,
     "admm_alpha": 1.6,
     "admm_sigma": 1e-6,
-    "admm_rho": 1000.0,
+    "admm_rho": 0.1,
     "admm_warm_start": False,
     "admm_initialize_unconstrained": False,
     "sqp_max_iter": 500,
@@ -82,9 +82,10 @@ sqp_parameters = SqpParameters(**sqp_parameters_dict)
 
 problem_parameters_dict = {
     "inverse_dynamics": True,
-    "n_h": 1,  # "inverse_dynamics": False,
+    "n_h": 1,
+    # "inverse_dynamics": False,
     # "n_h": 0,
-    "n_batch": 1,
+    "batch_size": 1,
     "dt": 0.01,
     "tf": 1.0,
     "x_init": [0.0, 0.0, 0.0, 0.0],
@@ -132,22 +133,22 @@ underactuation = CartPoleUnderactuation(system_parameters)
 print(f"Solving..")
 problem = Problem(problem_parameters)
 initial_guess = SqpSolution(
-    x=torch.zeros((problem.n_batch, problem.horizon, problem.n_x)),
-    u=torch.zeros((problem.n_batch, problem.horizon - 1, problem.n_u)),
-    mu=torch.zeros((problem.n_batch, problem.horizon, problem.n_x)),
-    nu=torch.zeros((problem.n_batch, problem.horizon - 1, problem.n_h)),
+    x=torch.zeros((problem.batch_size, problem.horizon, problem.n_x)),
+    u=torch.zeros((problem.batch_size, problem.horizon - 1, problem.n_u)),
+    mu=torch.zeros((problem.batch_size, problem.horizon, problem.n_x)),
+    nu=torch.zeros((problem.batch_size, problem.horizon - 1, problem.n_h)),
     ksi=[None] * problem.horizon,
 )
 
 # Costs
 Q = problem_parameters.q_w * torch.eye(dynamics.nx).repeat(
-    problem_parameters.n_batch, 1, 1
+    problem_parameters.batch_size, 1, 1
 )
 R = problem_parameters.r_w * torch.eye(dynamics.nu).repeat(
-    problem_parameters.n_batch, 1, 1
+    problem_parameters.batch_size, 1, 1
 )
 Qf = problem_parameters.qf_w * torch.eye(dynamics.nx).repeat(
-    problem_parameters.n_batch, 1, 1
+    problem_parameters.batch_size, 1, 1
 )
 
 # Set stage costs an initial guess
@@ -167,7 +168,7 @@ for k in range(problem.horizon - 1):
             problem_parameters.u_lb,
             problem_parameters.u_ub,
         ),
-        # CartPoleUnderactuation(system_parameters),
+        CartPoleUnderactuation(system_parameters),
     ]
 # Set terminal cost
 initial_guess.x[:, -1] = problem_parameters.x_des.clone()
@@ -193,7 +194,7 @@ animator = CartPoleAnimator(
     solution.x,
     system_parameters.lp,
     problem_parameters.dt,
-    problem_parameters.n_batch,
+    problem_parameters.batch_size,
 )
-# animator.animate(step_size=2)
-animator.save(filename="admm.mp4", step_size=2)
+animator.animate(step_size=2)
+# animator.save(filename="admm.mp4", step_size=2)

@@ -15,7 +15,7 @@ class ProblemParameters:
     def __init__(self, **args):
         # self.system: str = args["name"]
         self.inverse_dynamics: bool = args["inverse_dynamics"]
-        self.n_batch: int = args["n_batch"]
+        self.batch_size: int = args["batch_size"]
         self.tf: float = args["tf"]
         self.dt: float = args["dt"]
         self.n_x: int = len(args["q_w"])
@@ -23,10 +23,10 @@ class ProblemParameters:
         self.n_h: int = args["n_h"]
         self.horizon = int(self.tf / self.dt)
         # # Initial and final states
-        self.x_init = torch.tensor(args["x_init"]).repeat(self.n_batch, 1)
+        self.x_init = torch.tensor(args["x_init"]).repeat(self.batch_size, 1)
         # Apply noise only to the first two dimensions (usually positions)
-        self.x_init[:, 0:2] += args["noise_std"] * torch.randn((self.n_batch, 2))
-        self.x_des = torch.tensor(args["x_des"]).repeat(self.n_batch, 1)
+        self.x_init[:, 0:2] += args["noise_std"] * torch.randn((self.batch_size, 2))
+        self.x_des = torch.tensor(args["x_des"]).repeat(self.batch_size, 1)
 
         # State-control bounds
         self.x_lb = torch.tensor(args["x_lb"])
@@ -43,7 +43,7 @@ class ProblemParameters:
         return (
             f"=== Problem Parameters ===\n"
             f"  Inv Dynamics            : {self.inverse_dynamics}\n"
-            f"  Batch Size              : {self.n_batch}\n"
+            f"  Batch Size              : {self.batch_size}\n"
             f"  Final Time (tf)         : {self.tf:.3f}\n"
             f"  Time Step (dt)          : {self.dt:.4f}\n"
             f"  Horizon Steps           : {self.horizon}\n"
@@ -74,7 +74,7 @@ class Problem(ABC):
         self.n_x = params.n_x
         self.n_u = params.n_u
         self.n_h = params.n_h
-        self.n_batch = params.n_batch
+        self.batch_size = params.batch_size
 
         self.costs: List[List[Cost]] = []
         self.dynamics: Dynamics = None
@@ -82,8 +82,8 @@ class Problem(ABC):
         self.constraints: List[List[GenericConstraint]] = [None] * self.horizon
 
         # Initialize gradient tensors
-        self.Lx = torch.zeros((self.n_batch, self.horizon, self.n_x))
-        self.Lu = torch.zeros((self.n_batch, self.horizon - 1, self.n_u))
+        self.Lx = torch.zeros((self.batch_size, self.horizon, self.n_x))
+        self.Lu = torch.zeros((self.batch_size, self.horizon - 1, self.n_u))
 
     # --- Cost Aggregation Methods ---
 
@@ -188,7 +188,7 @@ class Problem(ABC):
 
     def evaluate_guess(self, solution_guess: SqpSolution):
         """Return total trajectory cost and constraint violation"""
-        batch_size = self.n_batch
+        batch_size = self.batch_size
         horizon = self.horizon
         dt = self.dt
 
@@ -235,7 +235,7 @@ class Problem(ABC):
         return cost, convergence_error
 
     def linearize(self, solution_guess: SqpSolution, regularization_scale):
-        batch_size = self.n_batch
+        batch_size = self.batch_size
         horizon = self.horizon
         n_x, n_u = self.n_x, self.n_u
         n_h = self.n_h

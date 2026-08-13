@@ -39,7 +39,7 @@ sqp_parameters = SqpParameters(**sqp_parameters_dict)
 
 problem_parameters_dict = {
     "inverse_dynamics": False,
-    "n_batch": 3,
+    "batch_size": 3,
     "tf": 1.0,
     "dt": 0.01,
     "n_h": 0,
@@ -64,22 +64,22 @@ dynamics = Dynamics(nx=4, nu=2, nq=2, nv=2)
 print(f"Solving..")
 problem = Problem(problem_parameters)
 initial_guess = SqpSolution(
-    x=torch.zeros((problem.n_batch, problem.horizon, problem.n_x)),
-    u=torch.zeros((problem.n_batch, problem.horizon - 1, problem.n_u)),
-    mu=torch.zeros((problem.n_batch, problem.horizon, problem.n_x)),
-    nu=torch.zeros((problem.n_batch, problem.horizon - 1, problem.n_h)),
+    x=torch.zeros((problem.batch_size, problem.horizon, problem.n_x)),
+    u=torch.zeros((problem.batch_size, problem.horizon - 1, problem.n_u)),
+    mu=torch.zeros((problem.batch_size, problem.horizon, problem.n_x)),
+    nu=torch.zeros((problem.batch_size, problem.horizon - 1, problem.n_h)),
     ksi=[None] * problem.horizon,
 )
 
 # Costs
 Q = problem_parameters.q_w * torch.eye(dynamics.nx).repeat(
-    problem_parameters.n_batch, 1, 1
+    problem_parameters.batch_size, 1, 1
 )
 R = problem_parameters.r_w * torch.eye(dynamics.nu).repeat(
-    problem_parameters.n_batch, 1, 1
+    problem_parameters.batch_size, 1, 1
 )
 Qf = problem_parameters.qf_w * torch.eye(dynamics.nx).repeat(
-    problem_parameters.n_batch, 1, 1
+    problem_parameters.batch_size, 1, 1
 )
 
 # Set stage costs an initial guess
@@ -209,14 +209,14 @@ if sys_params.name == "acrobot":
         sys_params.l1,
         sys_params.l2,
         problem_parameters.dt,
-        problem_parameters.n_batch,
+        problem_parameters.batch_size,
     )
 elif sys_params.name == "cartpole":
     anim = CartPoleAnimator(
         solution.x,
         sys_params.lp,
         problem_parameters.dt,
-        problem_parameters.n_batch,
+        problem_parameters.batch_size,
     )
 
 anim.animate(step_size=2)

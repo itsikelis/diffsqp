@@ -81,7 +81,7 @@ def get_constrained_qp_vectors(
 
 
 def admm_qp_solve(problem, parameters, mat, previous_solution=None):
-    batch_size = problem.n_batch
+    batch_size = problem.batch_size
     horizon = problem.horizon
     n_x = problem.n_x
     n_u = problem.n_u

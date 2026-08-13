@@ -93,15 +93,8 @@ class SqpSolutionLog:
         )
 
 
-## What to keep as info:
-# QP time
-# Line search time
-# Line search iterations
-# Total SQP iterations
-
-
 def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSolution):
-    batch_size = problem.n_batch
+    batch_size = problem.batch_size
 
     terminated = torch.zeros((batch_size), dtype=torch.bool)
     line_search_fails = 0
@@ -142,7 +135,6 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
             sqp_log.admm_iters.append(admm_log.iterations)
 
             ## Line search ##
-            # TODO: Log line search time
             alpha = torch.ones((batch_size))
             dones = terminated.clone()
             for ls_iter in range(parameters.ls_max_iter):

@@ -20,7 +20,7 @@ system:
 problem:
   inverse_dynamics: True
   n_h: 1 # Number of underactuated DoFs
-  n_batch: 1 # batch size
+  batch_size: 1 # batch size
   dt: 0.02 # node dt
   tf: 2.0 # total horizon time
 

@@ -35,7 +35,7 @@ prob_params = ProblemParameters(**cfg["problem"])
 print(f"Successfully loaded parameters. Starting solver...")
 
 # 1. Setup Parameters
-nB = cfg["problem"]["n_batch"]
+nB = cfg["problem"]["batch_size"]
 # dt = cfg["problem"]["dt"]
 dt = 0.001
 tf = 2.0  # Reduced time for faster testing
@@ -78,8 +78,10 @@ if cfg["system"]["name"] == "acrobot":
         sys_params.l1,
         sys_params.l2,
         prob_params.dt,
-        prob_params.n_batch,
+        prob_params.batch_size,
     )
 elif cfg["system"]["name"] == "cartpole":
-    anim = CartPoleAnimator(states, sys_params.lp, prob_params.dt, prob_params.n_batch)
+    anim = CartPoleAnimator(
+        states, sys_params.lp, prob_params.dt, prob_params.batch_size
+    )
 anim.animate(step_size=100)

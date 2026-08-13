@@ -35,7 +35,7 @@ def lqr_solve(problem: Problem, mat):
 
 
 def lqr_backward_pass_(problem: Problem, Q, q, R, r, S, A, B, b, C, D, d):
-    batch_size = problem.n_batch
+    batch_size = problem.batch_size
     horizon = problem.horizon
     n_x = problem.n_x
     n_u = problem.n_u
@@ -84,7 +84,7 @@ def lqr_backward_pass_(problem: Problem, Q, q, R, r, S, A, B, b, C, D, d):
 
 def lqr_forward_pass_(problem: Problem, K, k, P, p, A, B, b):
     # TODO: Add initial state optimization as an option
-    batch_size = problem.n_batch
+    batch_size = problem.batch_size
     horizon = problem.horizon
     n_x = problem.n_x
     n_u = problem.n_u
