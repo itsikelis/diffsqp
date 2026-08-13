@@ -127,7 +127,7 @@ def plot_states(states_tensor):
 
     plt.xlabel("Time Step $k$")
     plt.ylabel("Value")
-    plt.title("State Trajectory (First Batch)")
+    plt.title("State Trajectory (First Environment)")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -146,7 +146,7 @@ def plot_states(states_tensor):
 #
 #     plt.xlabel("Time Step $k$")
 #     plt.ylabel("Value")
-#     plt.title("State Trajectory (First Batch)")
+#     plt.title("State Trajectory (First Environment)")
 #     plt.legend()
 #     plt.grid(True)
 #     plt.tight_layout()
@@ -178,7 +178,7 @@ def plot_trajectories(states_tensor, controls_tensor):
         axs[0].plot(time_x, states_np[:, i], label=f"State $x_{{{i}}}$")
 
     axs[0].set_ylabel("Value")
-    axs[0].set_title("State Trajectory (First Batch)")
+    axs[0].set_title("State Trajectory (First Environment)")
     axs[0].legend()
     axs[0].grid(True)
 
@@ -188,7 +188,7 @@ def plot_trajectories(states_tensor, controls_tensor):
 
     axs[1].set_xlabel("Time Step $k$")
     axs[1].set_ylabel("Value")
-    axs[1].set_title("Control Trajectory (First Batch)")
+    axs[1].set_title("Control Trajectory (First Environment)")
     axs[1].legend()
     axs[1].grid(True)
 

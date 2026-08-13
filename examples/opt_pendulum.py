@@ -66,7 +66,7 @@ def plot_states(states_list):
 
     plt.xlabel("Time Step $k$")
     plt.ylabel("Value")
-    plt.title("State Trajectory (First Batch)")
+    plt.title("State Trajectory (First Environment)")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()

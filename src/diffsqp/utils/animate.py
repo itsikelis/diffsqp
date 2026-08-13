@@ -145,7 +145,7 @@ class AcrobotAnimator:
             ax.set_xlim(-L_total, L_total)
             ax.set_ylim(-L_total, L_total)
             ax.grid(True)
-            ax.set_title(f"Acrobot Batch {i}")
+            ax.set_title(f"Acrobot Environment {i}")
 
             # 'o-' creates a line with circular markers at the joints
             (line,) = ax.plot(

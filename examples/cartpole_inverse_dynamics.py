@@ -43,7 +43,7 @@ def plot_trajectories(states_tensor, controls_tensor):
         axs[0].plot(time_x, states_np[:, i], label=f"State $x_{{{i}}}$")
 
     axs[0].set_ylabel("Value")
-    axs[0].set_title("State Trajectory (First Batch)")
+    axs[0].set_title("State Trajectory (First Environment)")
     axs[0].legend()
     axs[0].grid(True)
 
@@ -53,7 +53,7 @@ def plot_trajectories(states_tensor, controls_tensor):
 
     axs[1].set_xlabel("Time Step $k$")
     axs[1].set_ylabel("Value")
-    axs[1].set_title("Control Trajectory (First Batch)")
+    axs[1].set_title("Control Trajectory (First Environment)")
     axs[1].legend()
     axs[1].grid(True)
 
@@ -85,7 +85,7 @@ problem_parameters_dict = {
     "n_h": 1,
     # "inverse_dynamics": False,
     # "n_h": 0,
-    "batch_size": 1,
+    "batch_size": 2,
     "dt": 0.01,
     "tf": 1.0,
     "x_init": [0.0, 0.0, 0.0, 0.0],
@@ -171,7 +171,7 @@ for k in range(problem.horizon - 1):
         CartPoleUnderactuation(system_parameters),
     ]
 # Set terminal cost
-initial_guess.x[:, -1] = problem_parameters.detach().x_des.clone()
+initial_guess.x[:, -1] = problem_parameters.x_des.detach().clone()
 problem.costs.append([LqrCost(Q=Qf, x_des=problem_parameters.x_des.detach().clone())])
 
 # Dynamics Constraints
