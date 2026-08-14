@@ -151,7 +151,7 @@ Qf = problem_parameters.qf_w * torch.eye(dynamics.nx).repeat(
     problem_parameters.batch_size, 1, 1
 )
 
-# Set stage costs an initial guess
+# Set stage costs, constraints and initial guess
 for k in range(problem.horizon - 1):
     initial_guess.x[:, k] = problem_parameters.x_init.detach().clone()
     problem.costs.append([LqrCost(Q=Q, R=R)])
@@ -168,11 +168,20 @@ for k in range(problem.horizon - 1):
             problem_parameters.u_lb,
             problem_parameters.u_ub,
         ),
-        CartPoleUnderactuation(system_parameters),
+        # CartPoleUnderactuation(system_parameters),
     ]
-# Set terminal cost
+# Terminal stage
 initial_guess.x[:, -1] = problem_parameters.x_des.detach().clone()
 problem.costs.append([LqrCost(Q=Qf, x_des=problem_parameters.x_des.detach().clone())])
+problem.constraints[-1] = [
+    StateBounds(
+        problem.n_x,
+        problem.n_u,
+        problem_parameters.x_lb,
+        problem_parameters.x_ub,
+    )
+]
+
 
 # Dynamics Constraints
 problem.dynamics = dynamics

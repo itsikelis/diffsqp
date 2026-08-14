@@ -92,6 +92,11 @@ class SqpSolutionLog:
             f"========================="
         )
 
+    def save_to_json(self, filepath: str) -> None:
+        """Saves the current state of the log to a JSON file."""
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(self.__dict__, f, indent=4)
+
 
 def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSolution):
     batch_size = problem.batch_size

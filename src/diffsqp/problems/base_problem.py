@@ -161,7 +161,6 @@ class Problem(ABC):
         if u is not None:
             constr = torch.cat([c.g(x, u) for c in self.constraints[stage_idx]], dim=1)
         else:
-            print(stage_idx)
             constr = torch.cat([c.g(x) for c in self.constraints[stage_idx]], dim=1)
 
         return constr

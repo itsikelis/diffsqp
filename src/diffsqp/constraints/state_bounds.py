@@ -1,3 +1,4 @@
+from typing import Optional
 import torch
 from torch import sin, cos
 
@@ -8,11 +9,11 @@ class StateBounds(GenericConstraint):
     def __init__(self, n_x, n_u, lb, ub):
         super().__init__(n_g=n_x, n_x=n_x, n_u=n_u, lb=lb, ub=ub)
 
-    def g(self, x: torch.Tensor, u: torch.Tensor):
+    def g(self, x: torch.Tensor, u: Optional[torch.Tensor] = None):
         res = x
         return res
 
-    def gx(self, x: torch.Tensor, u: torch.Tensor):
+    def gx(self, x: torch.Tensor, u: Optional[torch.Tensor] = None):
         batch_size = x.shape[0]
         n_g = self.n_g
         n_x = self.n_x
