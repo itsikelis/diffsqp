@@ -1,4 +1,5 @@
 import sys
+import json
 import time
 import torch
 from copy import copy
@@ -18,12 +19,16 @@ class SqpParameters:
         self.admm_eps: float = args["admm_eps"]
         self.admm_alpha: float = args["admm_alpha"]
         self.admm_sigma: float = args["admm_sigma"]
-        self.admm_rho: float = args["admm_rho"]
+        self.admm_rho_ineq: float = args["admm_rho_ineq"]
+        self.admm_rho_eq: float = args["admm_rho_eq"]
         self.admm_warm_start: float = args["admm_warm_start"]
         self.admm_initialize_unconstrained: float = args[
             "admm_initialize_unconstrained"
         ]
 
+        self.sqp_warm_start: float = args["sqp_warm_start"]
+        self.sqp_warm_start_file_name: str = args["sqp_warm_start_file_name"]
+        self.sqp_save_solution: str = args["sqp_save_solution"]
         self.sqp_max_iter: int = args["sqp_max_iter"]
         self.merit_mu: float = args["merit_mu"]
         self.ls_max_iter: int = args["ls_max_iter"]
@@ -94,6 +99,7 @@ class SqpSolutionLog:
 
     def save_to_json(self, filepath: str) -> None:
         """Saves the current state of the log to a JSON file."""
+        print(self.__dict__)
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(self.__dict__, f, indent=4)
 
@@ -234,7 +240,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
     sqp_log.sqp_iterations = iter + 1
     sqp_log.envs_terminated = torch.count_nonzero(terminated).item()
     sqp_log.total_cost = best_cost.tolist()
-    sqp_log.constraint_violation = best_constr_inf
+    sqp_log.constraint_violation = best_constr_inf.tolist()
     if torch.get_default_device() != "cpu":
         sqp_log.cuda_reserved_bytes = torch.cuda.memory_reserved(0)
         sqp_log.cuda_allocated_bytes = torch.cuda.memory_allocated(0)

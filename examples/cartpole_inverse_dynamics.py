@@ -23,6 +23,30 @@ from diffsqp.types import SqpSolution
 import matplotlib.pyplot as plt
 
 
+def save_solution(solution: SqpSolution, filepath: str) -> None:
+    """Saves only the x and u tensors for warm starting."""
+    # Best practice: Move tensors to the CPU before saving.
+    # This ensures you won't get CUDA errors if you try to load them on
+    # a machine with a different GPU setup or no GPU at all.
+    warmstart_data = {"x": solution.x.detach().cpu(), "u": solution.u.detach().cpu()}
+    torch.save(warmstart_data, filepath)
+    print(f"Warmstart data saved to {filepath}")
+
+
+def load_solution(
+    filepath: str, device: torch.device = torch.device("cpu")
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Loads x and u tensors and sends them to the target device."""
+    # weights_only=True is recommended in modern PyTorch for security
+    # map_location ensures the tensors load directly onto your target device
+    data = torch.load(filepath, map_location=device, weights_only=False)
+
+    x = data["x"]
+    u = data["u"]
+
+    return x, u
+
+
 def plot_trajectories(states_tensor, controls_tensor):
     # Detach and convert to numpy for the first batch
     states_np = states_tensor[0, :, :].detach().cpu().numpy()
@@ -68,9 +92,13 @@ sqp_parameters_dict = {
     "admm_eps": 0.01,
     "admm_alpha": 1.6,
     "admm_sigma": 1e-6,
-    "admm_rho": 0.1,
+    "admm_rho_ineq": 0.4,
+    "admm_rho_eq": 100.0,
     "admm_warm_start": False,
     "admm_initialize_unconstrained": False,
+    "sqp_save_solution": False,
+    "sqp_warm_start": True,
+    "sqp_warm_start_file_name": "lqr_solution.pt",
     "sqp_max_iter": 500,
     "merit_mu": 1e6,
     "ls_max_iter": 10,
@@ -81,11 +109,11 @@ sqp_parameters_dict = {
 sqp_parameters = SqpParameters(**sqp_parameters_dict)
 
 problem_parameters_dict = {
-    "inverse_dynamics": True,
-    "n_h": 1,
-    # "inverse_dynamics": False,
-    # "n_h": 0,
-    "batch_size": 2,
+    # "inverse_dynamics": True,
+    # "n_h": 1,
+    "inverse_dynamics": False,
+    "n_h": 0,
+    "batch_size": 1,
     "dt": 0.01,
     "tf": 1.0,
     "x_init": [0.0, 0.0, 0.0, 0.0],
@@ -132,13 +160,23 @@ underactuation = CartPoleUnderactuation(system_parameters)
 # Create problem
 print(f"Solving..")
 problem = Problem(problem_parameters)
+
+if sqp_parameters.sqp_warm_start:
+    target_device = torch.device("cpu")
+    x, u = load_solution(sqp_parameters.sqp_warm_start_file_name, device=target_device)
+else:
+    x = torch.zeros((problem.batch_size, problem.horizon, problem.n_x))
+    u = torch.zeros((problem.batch_size, problem.horizon - 1, problem.n_u))
+
 initial_guess = SqpSolution(
-    x=torch.zeros((problem.batch_size, problem.horizon, problem.n_x)),
-    u=torch.zeros((problem.batch_size, problem.horizon - 1, problem.n_u)),
+    x=x,
+    u=u,
     mu=torch.zeros((problem.batch_size, problem.horizon, problem.n_x)),
     nu=torch.zeros((problem.batch_size, problem.horizon - 1, problem.n_h)),
     ksi=[None] * problem.horizon,
 )
+
+plot_trajectories(initial_guess.x, initial_guess.u)
 
 # Costs
 Q = problem_parameters.q_w * torch.eye(dynamics.nx).repeat(
@@ -153,7 +191,7 @@ Qf = problem_parameters.qf_w * torch.eye(dynamics.nx).repeat(
 
 # Set stage costs, constraints and initial guess
 for k in range(problem.horizon - 1):
-    initial_guess.x[:, k] = problem_parameters.x_init.detach().clone()
+    # initial_guess.x[:, k] = problem_parameters.x_init.detach().clone()
     problem.costs.append([LqrCost(Q=Q, R=R)])
     problem.constraints[k] = [
         StateBounds(
@@ -171,7 +209,7 @@ for k in range(problem.horizon - 1):
         # CartPoleUnderactuation(system_parameters),
     ]
 # Terminal stage
-initial_guess.x[:, -1] = problem_parameters.x_des.detach().clone()
+# initial_guess.x[:, -1] = problem_parameters.x_des.detach().clone()
 problem.costs.append([LqrCost(Q=Qf, x_des=problem_parameters.x_des.detach().clone())])
 problem.constraints[-1] = [
     StateBounds(
@@ -192,9 +230,12 @@ if problem_parameters.inverse_dynamics:
 # Solve
 solution, log = sqp_solve(problem, sqp_parameters, initial_guess)
 
-print("Time elapsed: ", log.solve_wall_time_s, " s.")
+# print("Time elapsed: ", log.solve_wall_time_s, " s.")
 
 print(log)
+# log.save_to_json("lqr_solution.json")
+if sqp_parameters.sqp_save_solution:
+    save_solution(solution, sqp_parameters.sqp_warm_start_file_name)
 
 plot_trajectories(solution.x, solution.u)
 

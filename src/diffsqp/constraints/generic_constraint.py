@@ -12,6 +12,7 @@ class GenericConstraint(ABC):
         self.n_u = n_u
         self.ub = ub
         self.lb = lb
+        self.is_equality = (self.ub == self.lb).all()
 
     @abstractmethod
     def g(self, x: torch.Tensor, u: Optional[torch.Tensor] = None) -> torch.Tensor:

@@ -88,9 +88,11 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
     n_h = problem.n_h
 
     ## Get ADMM corrections ##
-    rho = copy(parameters.admm_rho)
-    rho_inv = 1.0 / rho
+    rho_ineq = copy(parameters.admm_rho_ineq)
+    rho_eq = copy(parameters.admm_rho_eq)
     sigma = parameters.admm_sigma
+    rho = [None] * problem.horizon
+    rho_inv = [None] * problem.horizon
     rho_changed = True
 
     if previous_solution is None:
@@ -105,6 +107,18 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
     else:
         admm_solution = previous_solution
 
+    # Calculate rho
+    for k in range(horizon):
+        rho_vec = []
+        for c in problem.constraints[k]:
+            if c.is_equality:
+                rho_vec += [rho_eq for _ in range(c.n_g)]
+            else:
+                rho_vec += [rho_ineq for _ in range(c.n_g)]
+
+        rho[k] = torch.tensor(rho_vec)
+        rho_inv[k] = 1.0 / rho[k]
+
     for admm_iter in range(parameters.admm_max_iter):
         # Max residual values
         r_prim_x = -float("inf") * torch.ones((batch_size))
@@ -113,9 +127,7 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
 
         # TODO: Add rho_changed option
         for k in range(horizon - 1):
-
             n_g = mat.M[k].shape[-2]
-            Diag_rho = rho * torch.eye(n_g)
 
             mat.Q[:, k], mat.R[:, k], mat.S[:, k] = get_constrained_qp_matrices(
                 mat.Q[:, k],
@@ -123,7 +135,7 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
                 mat.S[:, k],
                 mat.M[k],
                 mat.N[k],
-                Diag_rho,
+                torch.diag(rho[k]),
                 sigma,
             )
 
@@ -134,7 +146,7 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
                 mat.N[k],
                 admm_solution.z[k],
                 admm_solution.ksi[k],
-                Diag_rho,
+                torch.diag(rho[k]),
                 sigma,
                 admm_solution.dx[:, k],
                 admm_solution.du[:, k],
@@ -190,13 +202,13 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
             # z = clamp(z_hat + rho_inv * ksi, lb, ub) #
             # ---------------------------------------- #
             admm_solution.z[k] = torch.clamp(
-                z_hat + rho_inv * admm_solution.ksi[k], lb, ub
+                z_hat + rho_inv[k] * admm_solution.ksi[k], lb, ub
             )
 
             # ----------------------------- #
             # ksi = ksi + rho ∘ (z_hat - z) #
             # ----------------------------- #
-            admm_solution.ksi[k] = admm_solution.ksi[k] + rho * (
+            admm_solution.ksi[k] = admm_solution.ksi[k] + rho[k] * (
                 z_hat - admm_solution.z[k]
             )
 
@@ -243,7 +255,7 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
         # Check ADMM termination
         if check_admm_termination(parameters, admm_iter, r_prim_x, r_prim_u):
             log = AdmmLog(
-                rho=rho,
+                rho=rho[k],
                 iterations=admm_iter + 1,
             )
             return admm_solution, log

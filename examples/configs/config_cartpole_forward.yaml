@@ -43,7 +43,8 @@ solver:
   # admm_alpha: 1.0
   admm_sigma: 10.0E-6
   # admm_sigma: 0.0
-  admm_rho: 0.4
+  admm_rho_ineq: 0.4
+  admm_rho_eq: 1000.0
   admm_warm_start: False
   admm_initialize_unconstrained: False
   sqp_max_iter: 500

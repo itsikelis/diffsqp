@@ -41,7 +41,8 @@ solver:
   admm_eps: 0.01
   admm_alpha: 1.6
   admm_sigma: 10.0E-6
-  admm_rho: 0.1
+  admm_rho_ineq: 0.1
+  admm_rho_eq: 1000.0
   sqp_max_iter: 500
   merit_mu: 1.0
   ls_max_iter: 10
