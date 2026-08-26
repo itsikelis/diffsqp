@@ -124,7 +124,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
     for iter in range(parameters.sqp_max_iter):
         try:
             ## Linearize problem ##
-            regularization_scale = line_search_fails * 1e-8
+            regularization_scale = 10.0**line_search_fails
             mat = problem.linearize(current_guess, regularization_scale)
 
             if (
