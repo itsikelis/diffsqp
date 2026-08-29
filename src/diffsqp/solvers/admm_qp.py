@@ -115,17 +115,19 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
     rho_inv = [None] * problem.horizon
     rho_changed = True
 
-    if previous_solution is None:
-        admm_solution = AdmmSolution(
-            dx=torch.zeros((batch_size, horizon, n_x)),
-            du=torch.zeros((batch_size, horizon - 1, n_u)),
-            mu=torch.zeros((batch_size, horizon, n_x)),
-            nu=torch.zeros((batch_size, horizon - 1, n_h)),
-            z=[torch.zeros((batch_size, problem.n_g(k))) for k in range(horizon)],
-            ksi=[torch.zeros((batch_size, problem.n_g(k))) for k in range(horizon)],
-        )
-    else:
-        admm_solution = previous_solution
+    z_prev = [torch.zeros((batch_size, problem.n_g(k))) for k in range(horizon)]
+
+    admm_solution = AdmmSolution(
+        dx=torch.zeros((batch_size, horizon, n_x)),
+        du=torch.zeros((batch_size, horizon - 1, n_u)),
+        mu=torch.zeros((batch_size, horizon, n_x)),
+        nu=torch.zeros((batch_size, horizon - 1, n_h)),
+        z=[torch.zeros((batch_size, problem.n_g(k))) for k in range(horizon)],
+        ksi=[torch.zeros((batch_size, problem.n_g(k))) for k in range(horizon)],
+    )
+    if previous_solution is not None:
+        admm_solution.z[:] = previous_solution.z[:]
+        admm_solution.ksi[:] = previous_solution.ksi[:]
 
     # Calculate rho
     for k in range(horizon):
