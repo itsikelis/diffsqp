@@ -16,7 +16,6 @@ from diffsqp.types import SqpSolution, AdmmSolution, LqrSolution
 class SqpParameters:
     def __init__(self, **args):
         self.admm_max_iter: int = args["admm_max_iter"]
-        self.admm_eps: float = args["admm_eps"]
         self.admm_alpha: float = args["admm_alpha"]
         self.admm_sigma: float = args["admm_sigma"]
         self.admm_rho_ineq: float = args["admm_rho_ineq"]
@@ -25,6 +24,11 @@ class SqpParameters:
         self.admm_initialize_unconstrained: float = args[
             "admm_initialize_unconstrained"
         ]
+        self.admm_abs_tolerance = args["admm_abs_tolerance"]
+        self.admm_abs_tolerance_final = args["admm_abs_tolerance_final"]
+        self.admm_rel_tolerance = args["admm_rel_tolerance"]
+        self.admm_rel_tolerance_final = args["admm_rel_tolerance_final"]
+        self.admm_tolerance_update_steps = args["admm_tolerance_update_steps"]
 
         self.sqp_warm_start: float = args["sqp_warm_start"]
         self.sqp_warm_start_file_name: str = args["sqp_warm_start_file_name"]

@@ -38,14 +38,35 @@ def get_constrained_qp_matrices(Q_k, R_k, S_k, M_k, N_k, Diag_rho, sigma):
     return Q_k_, R_k_, S_k_
 
 
-def check_admm_termination(parameters, admm_iter, r_prim_x, r_prim_u):
+def check_admm_termination(
+    parameters,
+    admm_iter,
+    norm_prim,
+    norm_prim_rel,
+    norm_dual,
+    norm_dual_rel,
+    current_abs_tol,
+    current_rel_tol,
+):
     # Maximum iterations reached
     if admm_iter == parameters.admm_max_iter - 1:
         return True
 
-    if torch.all(r_prim_x <= parameters.admm_eps) and torch.all(
-        r_prim_u <= parameters.admm_eps
-    ):
+    print(
+        "primal: ",
+        norm_prim.item(),
+        "primal rel: ",
+        norm_prim_rel.item(),
+        "dual: ",
+        norm_dual.item(),
+        "dual rel: ",
+        norm_dual_rel.item(),
+    )
+
+    tol_prim = current_abs_tol + current_rel_tol * norm_prim_rel
+    tol_dual = current_abs_tol + current_rel_tol * norm_dual_rel
+
+    if torch.all(norm_prim <= tol_prim) and torch.all(norm_dual <= tol_dual):
         return True
 
     return False
@@ -90,7 +111,6 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
     ## Get ADMM corrections ##
     rho_ineq = copy(parameters.admm_rho_ineq)
     rho_eq = copy(parameters.admm_rho_eq)
-    sigma = parameters.admm_sigma
     rho = [None] * problem.horizon
     rho_inv = [None] * problem.horizon
     rho_changed = True
@@ -119,44 +139,100 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
         rho[k] = torch.tensor(rho_vec)
         rho_inv[k] = 1.0 / rho[k]
 
+    # --- Tolerance Tightening Setup ---
+    current_abs_tol = parameters.admm_abs_tolerance
+    current_rel_tol = parameters.admm_rel_tolerance
+
+    update_steps = (
+        parameters.admm_tolerance_update_steps
+        if parameters.admm_tolerance_update_steps > 0
+        else parameters.admm_max_iter
+    )
+
+    abs_tol_step = 0.0
+    if parameters.admm_abs_tolerance_final > 0.0:
+        abs_tol_step = (
+            parameters.admm_abs_tolerance_final - parameters.admm_abs_tolerance
+        ) / update_steps
+
+    rel_tol_step = 0.0
+    if parameters.admm_rel_tolerance_final > 0.0:
+        rel_tol_step = (
+            parameters.admm_rel_tolerance_final - parameters.admm_rel_tolerance
+        ) / update_steps
+    # ----------------------------------
+
+    # Cache matrices
+    orig_Q = mat.Q.clone()
+    orig_R = mat.R.clone()
+    orig_S = mat.S.clone()
+    orig_q = mat.q.clone()
+    orig_r = mat.r.clone()
+
     for admm_iter in range(parameters.admm_max_iter):
         # Max residual values
-        r_prim_x = -float("inf") * torch.ones((batch_size))
-        r_prim_u = -float("inf") * torch.ones((batch_size))
-        r_dual = -float("inf") * torch.ones((batch_size))
+        norm_prim = -float("inf") * torch.ones((batch_size))
+        norm_prim_rel = -float("inf") * torch.ones((batch_size))
+        norm_dual = -float("inf") * torch.ones((batch_size))
+        norm_dual_rel = -float("inf") * torch.ones((batch_size))
 
-        # TODO: Add rho_changed option
-        for k in range(horizon - 1):
-            n_g = mat.M[k].shape[-2]
+        for k in range(horizon):
+            Q_k = orig_Q[:, k]
+            q_k = orig_q[:, k]
+            M_k = mat.M[k]
+            z_k = admm_solution.z[k]
+            ksi_k = admm_solution.ksi[k]
+            dx_prev_k = admm_solution.dx[:, k]
+            Diag_rho = torch.diag(rho[k])
+            sigma = parameters.admm_sigma
+            n_x = Q_k.shape[-1]
 
-            mat.Q[:, k], mat.R[:, k], mat.S[:, k] = get_constrained_qp_matrices(
-                mat.Q[:, k],
-                mat.R[:, k],
-                mat.S[:, k],
-                mat.M[k],
-                mat.N[k],
-                torch.diag(rho[k]),
-                sigma,
+            # Q = Q +M^T * diag(rho) * M + sigma * I
+            mat.Q[:, k] = (
+                Q_k
+                + torch.einsum("...ki,kk,...kj->...ij", M_k, Diag_rho, M_k)
+                + sigma * torch.eye(n_x)
             )
 
-            mat.q[:, k], mat.r[:, k] = get_constrained_qp_vectors(
-                mat.q[:, k],
-                mat.r[:, k],
-                mat.M[k],
-                mat.N[k],
-                admm_solution.z[k],
-                admm_solution.ksi[k],
-                torch.diag(rho[k]),
-                sigma,
-                admm_solution.dx[:, k],
-                admm_solution.du[:, k],
+            mat.q[:, k] = (
+                q_k
+                + torch.einsum("...ij,...i->...j", M_k, ksi_k)
+                - torch.einsum("...ij,ii,...i->...j", M_k, Diag_rho, z_k)
+                - sigma * dx_prev_k
             )
+
+            if k < horizon - 1:
+                R_k = orig_R[:, k]
+                r_k = orig_r[:, k]
+                S_k = orig_S[:, k]
+                N_k = mat.N[k]
+                du_prev_k = admm_solution.du[:, k]
+                n_u = R_k.shape[-1]
+                # R = R + N^T * diag(rho) * N + sigma * I
+                mat.R[:, k] = (
+                    R_k
+                    + torch.einsum("...ki,kk,...kj->...ij", N_k, Diag_rho, N_k)
+                    + sigma * torch.eye(n_u)
+                )
+                # S = S + N^T * diag(rho) * M
+                mat.S[:, k] = S_k + torch.einsum(
+                    "...ki,kk,...kj->...ij", N_k, Diag_rho, M_k
+                )
+
+                # r_k = r_k + N^T * y - N^T * diag(rho) * z - sigma * du_prev
+                mat.r[:, k] = (
+                    r_k
+                    + torch.einsum("...ij,...i->...j", N_k, ksi_k)
+                    - torch.einsum("...ij,ii,...i->...j", N_k, Diag_rho, z_k)
+                    - sigma * du_prev_k
+                )
 
         # Solve LQR to get dx_hat, du_hat
         lqr_solution = lqr_solve(problem, mat)
 
         # ADMM step
         for k in range(horizon):
+            Diag_rho = torch.diag(rho[k])
             alpha = parameters.admm_alpha
             lb, ub = problem.g_bounds(k)
 
@@ -212,50 +288,102 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
                 z_hat - admm_solution.z[k]
             )
 
-            ## O'Donoghue et. al. inspired termination residuals ##
+            ### Residual Calculation ###
+
             dx_k = admm_solution.dx[:, k]
-            dx_hat_k = lqr_solution.dx[:, k]
             if k < horizon - 1:
                 du_k = admm_solution.du[:, k]
-                du_hat_k = lqr_solution.du[:, k]
-
+            z_k = admm_solution.z[k]
             ksi_k = admm_solution.ksi[k]
 
-            # ---------------------------- #
-            # r_prim_x = |dx - dx_hat|_inf #
-            # r_prim_u = |du - du_hat|_inf #
-            # ---------------------------- #
-            r_prim_x_k = dx_k - dx_hat_k
-            r_prim_x_k = torch.norm(r_prim_x_k, p=float("inf"), dim=1)
+            # ---------------------------------- #
+            # z_diff_scaled = rho * (z - z_prev) #
+            # ---------------------------------- #
+            z_diff = z_k - z_prev[k]
+            z_diff_scaled_k = torch.einsum("...ij,...j->...i", Diag_rho, z_diff)
 
+            # ---------------------------------------------------------------- #
+            # r_dual = = max(r_dual, M^T * z_diff_scaled, N^T * z_diff_scaled) #
+            # ---------------------------------------------------------------- #
+            r_dual_x = torch.einsum("...ji,...j->...i", M_k, z_diff_scaled_k)
+            norm_dual = torch.maximum(
+                norm_dual,
+                torch.norm(r_dual_x, p=float("inf"), dim=1),
+            )
             if k < horizon - 1:
-                r_prim_u_k = du_k - du_hat_k
-                r_prim_u_k = torch.norm(r_prim_u_k, p=float("inf"), dim=1)
+                r_dual_u = torch.einsum("...ji,...j->...i", N_k, z_diff_scaled_k)
+                norm_dual = torch.maximum(
+                    norm_dual, torch.norm(r_dual_u, p=float("inf"), dim=1)
+                )
 
-            # Store largest residual overall
-            r_prim_x = torch.maximum(r_prim_x, r_prim_x_k)
-            r_prim_u = torch.maximum(r_prim_u, r_prim_u_k)
+            # ---------------------------- #
+            # r_prim = M * dx + N * du - z #
+            # ---------------------------- #
+            MdxNdu = torch.einsum("...ij,...j->...i", M_k, dx_k)
+            if k < horizon - 1:
+                MdxNdu += torch.einsum("...ij,...j->...i", N_k, du_k)
 
-            # ------------------------------------------------------ #
-            # r_dual_x = |rho * (Q * dx + S^T * du + q - M^T * ksi)| #
-            # r_dual_u = |rho * (R * du + S * dx + r - N^T * ksi)|   #
-            # ------------------------------------------------------ #
-            # r_dual_x_k = torch.einsum("...ij,...j->...i", Q_k, dx_k)
-            # if k < horizon - 1:
-            #     r_dual_x_k += torch.einsum("...ij,...i->...j", S_k, du_k)
-            # r_dual_x_k += q_k
-            # r_dual_x_k -= torch.einsum("...ij,...i->...j", M_k, ksi_k)
-            #
-            # if k < horizon - 1:
-            #     r_dual_u_k = torch.einsum("...ij,...j->...i", R_k, du_k)
-            #     r_dual_u_k += torch.einsum("...ij,...j->...i", S_k, dx_k)
-            #     r_dual_u_k += r_k
-            #     r_dual_u_k -= torch.einsum("...ij,...i->...j", N_k, -ksi_k)
+            prim_res_k = MdxNdu - z_k
+
+            norm_prim = torch.maximum(
+                norm_prim, torch.norm(prim_res_k, p=float("inf"), dim=1)
+            )
+
+            # -------------------------------------------- #
+            # r_prim_rel = max(r_prim, M * dx + N * du, z) #
+            # -------------------------------------------- #
+            norm_prim_rel = torch.maximum(
+                norm_prim_rel,
+                torch.maximum(
+                    torch.norm(MdxNdu, p=float("inf"), dim=1),
+                    torch.norm(z_k, p=float("inf"), dim=1),
+                ),
+            )
+
+            # ---------------------------------------------- #
+            # r_dual_rel = max(r_dual, M^T * ksi, N^T * ksi) #
+            # ---------------------------------------------- #
+            x_k_rel = torch.einsum("...ji,...j->...i", M_k, ksi_k)
+            norm_dual_rel = torch.maximum(
+                norm_dual_rel,
+                torch.norm(x_k_rel, p=float("inf"), dim=1),
+            )
+            if k < horizon - 1:
+                u_k_rel = torch.einsum("...ji,...j->...i", N_k, ksi_k)
+                norm_dual_rel = torch.maximum(
+                    norm_dual_rel,
+                    torch.norm(u_k_rel, p=float("inf"), dim=1),
+                )
+
+            z_prev[k] = z_k.detach().clone()
 
         # Check ADMM termination
-        if check_admm_termination(parameters, admm_iter, r_prim_x, r_prim_u):
+        if check_admm_termination(
+            parameters,
+            admm_iter,
+            norm_prim,
+            norm_prim_rel,
+            norm_dual,
+            norm_dual_rel,
+            current_abs_tol,
+            current_rel_tol,
+        ):
             log = AdmmLog(
                 rho=rho[k],
                 iterations=admm_iter + 1,
             )
             return admm_solution, log
+
+        # Tighten absolute tolerance
+        if (
+            parameters.admm_abs_tolerance_final > 0.0
+            and current_abs_tol > parameters.admm_abs_tolerance_final
+        ):
+            current_abs_tol += abs_tol_step
+
+        # Tighten relative tolerance
+        if (
+            parameters.admm_rel_tolerance_final > 0.0
+            and current_rel_tol > parameters.rel_tolerance_final
+        ):
+            current_rel_tol += rel_tol_step
