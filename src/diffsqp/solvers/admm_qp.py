@@ -6,36 +6,87 @@ from diffsqp.solvers import lqr_solve
 from diffsqp.types import AdmmSolution, AdmmLog
 
 
-def get_constrained_qp_matrices(Q_k, R_k, S_k, M_k, N_k, Diag_rho, sigma):
-    n_x = Q_k.shape[-1]
-    n_u = R_k.shape[-1]
+def update_constrained_matrices(
+    parameters,
+    mat,
+    orig_Q,
+    orig_q,
+    orig_R,
+    orig_r,
+    orig_S,
+    admm_solution,
+    rho,
+    rho_changed,
+):
+    horizon = len(mat.M)
+    for k in range(horizon - 1):
+        Q_k = orig_Q[:, k]
+        q_k = orig_q[:, k]
+        M_k = mat.M[k]
+        z_k = admm_solution.z[k]
+        ksi_k = admm_solution.ksi[k]
+        dx_prev_k = admm_solution.dx[:, k]
+        Diag_rho = torch.diag(rho[k])
+        sigma = parameters.admm_sigma
+        n_x = Q_k.shape[-1]
 
+        if rho_changed:
+            # Q = Q +M^T * diag(rho) * M + sigma * I
+            mat.Q[:, k] = (
+                Q_k
+                + torch.einsum("...ki,kk,...kj->...ij", M_k, Diag_rho, M_k)
+                + sigma * torch.eye(n_x)
+            )
+
+        mat.q[:, k] = (
+            q_k
+            + torch.einsum("...ij,...i->...j", M_k, ksi_k)
+            - torch.einsum("...ij,ii,...i->...j", M_k, Diag_rho, z_k)
+            - sigma * dx_prev_k
+        )
+
+        R_k = orig_R[:, k]
+        r_k = orig_r[:, k]
+        S_k = orig_S[:, k]
+        N_k = mat.N[k]
+        du_prev_k = admm_solution.du[:, k]
+        n_u = R_k.shape[-1]
+        if rho_changed:
+            # R = R + N^T * diag(rho) * N + sigma * I
+            mat.R[:, k] = (
+                R_k
+                + torch.einsum("...ki,kk,...kj->...ij", N_k, Diag_rho, N_k)
+                + sigma * torch.eye(n_u)
+            )
+            # S = S + N^T * diag(rho) * M
+            mat.S[:, k] = S_k + torch.einsum(
+                "...ki,kk,...kj->...ij", N_k, Diag_rho, M_k
+            )
+
+        # r_k = r_k + N^T * y - N^T * diag(rho) * z - sigma * du_prev
+        mat.r[:, k] = (
+            r_k
+            + torch.einsum("...ij,...i->...j", N_k, ksi_k)
+            - torch.einsum("...ij,ii,...i->...j", N_k, Diag_rho, z_k)
+            - sigma * du_prev_k
+        )
+
+    # Final stage
     # Q = Q +M^T * diag(rho) * M + sigma * I
-    Q_k_ = (
-        Q_k
-        + torch.einsum("...ki,kk,...kj->...ij", M_k, Diag_rho, M_k)
-        + sigma * torch.eye(n_x)
+    if rho_changed:
+        mat.Q[:, k] = (
+            Q_k
+            + torch.einsum("...ki,kk,...kj->...ij", M_k, Diag_rho, M_k)
+            + sigma * torch.eye(n_x)
+        )
+        rho_changed = False
+
+    mat.q[:, k] = (
+        q_k
+        + torch.einsum("...ij,...i->...j", M_k, ksi_k)
+        - torch.einsum("...ij,ii,...i->...j", M_k, Diag_rho, z_k)
+        - sigma * dx_prev_k
     )
-
-    # R = R + N^T * diag(rho) * N + sigma * I
-    R_k_ = (
-        R_k
-        + torch.einsum("...ki,kk,...kj->...ij", N_k, Diag_rho, N_k)
-        + sigma * torch.eye(n_u)
-    )
-
-    # S = S + N^T * diag(rho) * M
-    S_k_ = S_k + torch.einsum("...ki,kk,...kj->...ij", N_k, Diag_rho, M_k)
-
-    # print("diag(rho): ", Diag_rho)
-    # print("Before R_k: ", R_k)
-    # print("After R_k: ", R_k_)
-    #
-    # print("Before S_k: ", S_k)
-    # print("After S_k: ", S_k_)
-    # print("---------------------")
-
-    return Q_k_, R_k_, S_k_
 
 
 def check_admm_termination(
@@ -70,35 +121,6 @@ def check_admm_termination(
         return True
 
     return False
-
-
-def get_constrained_qp_vectors(
-    q_k, r_k, M_k, N_k, z_k, ksi_k, Diag_rho, sigma, dx_prev_k, du_prev_k
-):
-    # q_k = q_k + M^T * ksi - M^T * diag(rho) * z - sigma * dx_prev
-    q_k_ = (
-        q_k
-        + torch.einsum("...ij,...i->...j", M_k, ksi_k)
-        - torch.einsum("...ij,ii,...i->...j", M_k, Diag_rho, z_k)
-        - sigma * dx_prev_k
-    )
-
-    # r_k = r_k + N^T * y - N^T * diag(rho) * z - sigma * du_prev
-    r_k_ = (
-        r_k
-        + torch.einsum("...ij,...i->...j", N_k, ksi_k)
-        - torch.einsum("...ij,ii,...i->...j", N_k, Diag_rho, z_k)
-        - sigma * du_prev_k
-    )
-
-    # print("Before q_k: ", q_k)
-    # print("After q_k: ", q_k_)
-    #
-    # print("Before r_k: ", r_k)
-    # print("After r_k: ", r_k_)
-    # print("---------------------")
-
-    return q_k_, r_k_
 
 
 def admm_qp_solve(problem, parameters, mat, previous_solution=None):
@@ -178,56 +200,18 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
         norm_dual = -float("inf") * torch.ones((batch_size))
         norm_dual_rel = -float("inf") * torch.ones((batch_size))
 
-        for k in range(horizon):
-            Q_k = orig_Q[:, k]
-            q_k = orig_q[:, k]
-            M_k = mat.M[k]
-            z_k = admm_solution.z[k]
-            ksi_k = admm_solution.ksi[k]
-            dx_prev_k = admm_solution.dx[:, k]
-            Diag_rho = torch.diag(rho[k])
-            sigma = parameters.admm_sigma
-            n_x = Q_k.shape[-1]
-
-            # Q = Q +M^T * diag(rho) * M + sigma * I
-            mat.Q[:, k] = (
-                Q_k
-                + torch.einsum("...ki,kk,...kj->...ij", M_k, Diag_rho, M_k)
-                + sigma * torch.eye(n_x)
-            )
-
-            mat.q[:, k] = (
-                q_k
-                + torch.einsum("...ij,...i->...j", M_k, ksi_k)
-                - torch.einsum("...ij,ii,...i->...j", M_k, Diag_rho, z_k)
-                - sigma * dx_prev_k
-            )
-
-            if k < horizon - 1:
-                R_k = orig_R[:, k]
-                r_k = orig_r[:, k]
-                S_k = orig_S[:, k]
-                N_k = mat.N[k]
-                du_prev_k = admm_solution.du[:, k]
-                n_u = R_k.shape[-1]
-                # R = R + N^T * diag(rho) * N + sigma * I
-                mat.R[:, k] = (
-                    R_k
-                    + torch.einsum("...ki,kk,...kj->...ij", N_k, Diag_rho, N_k)
-                    + sigma * torch.eye(n_u)
-                )
-                # S = S + N^T * diag(rho) * M
-                mat.S[:, k] = S_k + torch.einsum(
-                    "...ki,kk,...kj->...ij", N_k, Diag_rho, M_k
-                )
-
-                # r_k = r_k + N^T * y - N^T * diag(rho) * z - sigma * du_prev
-                mat.r[:, k] = (
-                    r_k
-                    + torch.einsum("...ij,...i->...j", N_k, ksi_k)
-                    - torch.einsum("...ij,ii,...i->...j", N_k, Diag_rho, z_k)
-                    - sigma * du_prev_k
-                )
+        update_constrained_matrices(
+            parameters,
+            mat,
+            orig_Q,
+            orig_q,
+            orig_R,
+            orig_r,
+            orig_S,
+            admm_solution,
+            rho,
+            rho_changed,
+        )
 
         # Solve LQR to get dx_hat, du_hat
         lqr_solution = lqr_solve(problem, mat)

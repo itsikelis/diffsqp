@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import List, NamedTuple
 import torch
 
 
@@ -14,6 +14,6 @@ class QpParameters(NamedTuple):
     C: torch.Tensor
     D: torch.Tensor
     d: torch.Tensor
-    M: torch.Tensor
-    N: torch.Tensor
-    n: torch.Tensor
+    M: List[torch.Tensor]
+    N: List[torch.Tensor]
+    n: List[torch.Tensor]
