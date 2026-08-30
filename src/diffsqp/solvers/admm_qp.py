@@ -131,8 +131,9 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
     n_h = problem.n_h
 
     ## Get ADMM corrections ##
-    rho_ineq = copy(parameters.admm_rho_ineq)
-    rho_eq = copy(parameters.admm_rho_eq)
+    rho_init = copy(parameters.admm_rho_init)
+    rho_min = copy(parameters.admm_rho_min)
+    rho_max = copy(parameters.admm_rho_max)
     rho = [None] * problem.horizon
     rho_inv = [None] * problem.horizon
     rho_changed = True
@@ -156,9 +157,9 @@ def admm_qp_solve(problem, parameters, mat, previous_solution=None):
         rho_vec = []
         for c in problem.constraints[k]:
             if c.is_equality:
-                rho_vec += [rho_eq for _ in range(c.n_g)]
+                rho_vec += [rho_max for _ in range(c.n_g)]
             else:
-                rho_vec += [rho_ineq for _ in range(c.n_g)]
+                rho_vec += [rho_min for _ in range(c.n_g)]
 
         rho[k] = torch.tensor(rho_vec)
         rho_inv[k] = 1.0 / rho[k]

@@ -7,10 +7,10 @@ from diffsqp.utils.math import mm, mv
 
 
 class UnderactuationConstraint(GenericConstraint):
-    def __init__(self, n_h, n_x, n_u):
-        lb = torch.zeros(n_h)
-        ub = torch.zeros(n_h)
-        super().__init__(n_g=n_h, n_x=n_x, n_u=n_u, lb=lb, ub=ub)
+    def __init__(self, n_h, n_x, n_u, tol=1e-4):
+        lb = torch.full((n_h,), -tol)
+        ub = torch.full((n_h,), tol)
+        super().__init__(n_g=n_h, n_x=n_x, n_u=n_u, lb=lb, ub=ub, is_equality=True)
 
         self.n_h = n_h
         self.n_x = n_x

@@ -6,13 +6,15 @@ from diffsqp.utils.math import mm, mv
 
 
 class GenericConstraint(ABC):
-    def __init__(self, n_g, n_x, n_u, lb: torch.Tensor, ub: torch.Tensor):
+    def __init__(
+        self, n_g, n_x, n_u, lb: torch.Tensor, ub: torch.Tensor, is_equality=False
+    ):
+        self.is_equality = is_equality
         self.n_g = n_g
         self.n_x = n_x
         self.n_u = n_u
         self.ub = ub
         self.lb = lb
-        self.is_equality = (self.ub == self.lb).all()
 
     @abstractmethod
     def g(self, x: torch.Tensor, u: Optional[torch.Tensor] = None) -> torch.Tensor:
