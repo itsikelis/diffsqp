@@ -18,12 +18,19 @@ class SqpParameters:
         self.admm_max_iter: int = args["admm_max_iter"]
         self.admm_alpha: float = args["admm_alpha"]
         self.admm_sigma: float = args["admm_sigma"]
-        self.admm_rho_ineq: float = args["admm_rho_ineq"]
-        self.admm_rho_eq: float = args["admm_rho_eq"]
-        self.admm_warm_start: float = args["admm_warm_start"]
-        self.admm_initialize_unconstrained: float = args[
-            "admm_initialize_unconstrained"
+        # Rho related #
+        self.admm_update_rho: bool = args["admm_update_rho"]
+        self.admm_reset_rho: float = args["admm_reset_rho"]
+        self.admm_rho_init: float = args["admm_rho_init"]
+        self.admm_rho_min: torch.Tensor = torch.tensor([args["admm_rho_min"]])
+        self.admm_rho_max: torch.Tensor = torch.tensor([args["admm_rho_max"]])
+        self.admm_adaptive_rho_tolerance = args["admm_adaptive_rho_tolerance"]
+        self.admm_rho_update_iter_freq = args["admm_rho_update_iter_freq"]
+        # Warm-start related #
+        self.admm_warm_start_unconstrained: float = args[
+            "admm_warm_start_unconstrained"
         ]
+        self.admm_reset_ksi: float = args["admm_reset_ksi"]
         self.admm_abs_tolerance = args["admm_abs_tolerance"]
         self.admm_abs_tolerance_final = args["admm_abs_tolerance_final"]
         self.admm_rel_tolerance = args["admm_rel_tolerance"]
@@ -122,6 +129,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
 
     sqp_log = SqpSolutionLog()
     admm_solution = None
+    admm_log = None
 
     # Solve for sqp_max_iter steps
     t_solve_start = time.time()
@@ -131,20 +139,9 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
             regularization_scale = 10.0**line_search_fails
             mat = problem.linearize(current_guess, regularization_scale)
 
-            if (
-                admm_solution is None
-                and parameters.admm_warm_start
-                and parameters.admm_initialize_unconstrained
-            ):
-                # Solve the unconstrained problem
-                admm_solution, admm_log = lqr_solve(problem, mat)
-
-            if parameters.admm_warm_start:
-                admm_solution, admm_log = admm_qp_solve(
-                    problem, parameters, mat, admm_solution
-                )
-            else:
-                admm_solution, admm_log = admm_qp_solve(problem, parameters, mat)
+            admm_solution, admm_log = admm_qp_solve(
+                problem, parameters, mat, admm_solution
+            )
 
             # Log admm iterations
             sqp_log.admm_iters.append(admm_log.iterations)

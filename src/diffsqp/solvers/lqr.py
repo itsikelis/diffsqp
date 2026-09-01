@@ -125,8 +125,11 @@ def lqr_forward_pass_(problem: Problem, K, k, P, p, A, B, b):
         du=du,
         mu=mu,
         nu=nu,
-        z=[torch.zeros((batch_size, problem.n_g(k))) for k in range(horizon)],
-        ksi=[torch.zeros((batch_size, problem.n_g(k))) for k in range(horizon)],
+        z=None,
+        ksi=None,
+        rho=None,
+        rho_inv=None,
+        rho_common=None,
     )
 
 

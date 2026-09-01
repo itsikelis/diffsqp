@@ -88,18 +88,33 @@ def plot_trajectories(states_tensor, controls_tensor):
 
 
 sqp_parameters_dict = {
+    ## ADMM ##
     "admm_max_iter": 50,
-    "admm_eps": 0.01,
     "admm_alpha": 1.6,
     "admm_sigma": 1e-6,
-    "admm_rho_ineq": 0.4,
-    "admm_rho_eq": 100.0,
-    "admm_warm_start": False,
-    "admm_initialize_unconstrained": False,
+    # Rho related
+    "admm_reset_rho": False,
+    "admm_update_rho": True,
+    "admm_rho_init": 0.4,
+    "admm_rho_min": 1e-6,
+    "admm_rho_max": 1e8,
+    "admm_adaptive_rho_tolerance": 10.0,
+    "admm_rho_update_iter_freq": 10,
+    # Warm starting
+    "admm_warm_start_unconstrained": True,
+    "admm_reset_ksi": False,
+    # "admm_initialize_unconstrained": False,
+    # Tolerances
+    "admm_abs_tolerance": 0.001,
+    "admm_abs_tolerance_final": -1.0,
+    "admm_rel_tolerance": 0.0001,
+    "admm_rel_tolerance_final": -1.0,
+    "admm_tolerance_update_steps": 0,
+    ## SQP ##
     "sqp_save_solution": False,
-    "sqp_warm_start": True,
+    "sqp_warm_start": False,
     "sqp_warm_start_file_name": "lqr_solution.pt",
-    "sqp_max_iter": 500,
+    "sqp_max_iter": 100,
     "merit_mu": 1e6,
     "ls_max_iter": 10,
     "sqp_eps": 1e-4,
@@ -113,12 +128,12 @@ problem_parameters_dict = {
     # "n_h": 1,
     "inverse_dynamics": False,
     "n_h": 0,
-    "batch_size": 1,
+    "batch_size": 3,
     "dt": 0.01,
     "tf": 1.0,
     "x_init": [0.0, 0.0, 0.0, 0.0],
     "x_des": [0.0, 3.14159, 0.0, 0.0],
-    "noise_std": 0.0,
+    "noise_std": 0.1,
     # State-control bounds
     "x_lb": [-2.0, -1e6, -5.0, -15.0],
     "x_ub": [2.0, 1e6, 5.0, 15.0],
@@ -164,6 +179,7 @@ problem = Problem(problem_parameters)
 if sqp_parameters.sqp_warm_start:
     target_device = torch.device("cpu")
     x, u = load_solution(sqp_parameters.sqp_warm_start_file_name, device=target_device)
+    # u = torch.zeros((problem.batch_size, problem.horizon - 1, problem.n_u))
 else:
     x = torch.zeros((problem.batch_size, problem.horizon, problem.n_x))
     u = torch.zeros((problem.batch_size, problem.horizon - 1, problem.n_u))
@@ -206,7 +222,7 @@ for k in range(problem.horizon - 1):
             problem_parameters.u_lb,
             problem_parameters.u_ub,
         ),
-        # CartPoleUnderactuation(system_parameters),
+        CartPoleUnderactuation(system_parameters),
     ]
 # Terminal stage
 # initial_guess.x[:, -1] = problem_parameters.x_des.detach().clone()
