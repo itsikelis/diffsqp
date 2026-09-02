@@ -46,7 +46,6 @@ def update_rho(problem, parameters, solution, residuals):
         solution.rho[k][update_mask] = new_rho_k
         solution.rho_inv[k][update_mask] = 1.0 / new_rho_k
 
-    print(solution.rho[5])
     return True
 
 

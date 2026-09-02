@@ -6,7 +6,7 @@ from torch import relu
 from diffsqp.costs import Cost
 from diffsqp.dynamics import Dynamics
 from diffsqp.constraints import UnderactuationConstraint, GenericConstraint
-from diffsqp.types import SqpSolution, QpParameters
+from diffsqp.types import SqpSolution, AdmmSolution, QpParameters
 
 from diffsqp.utils.math import mv
 
@@ -185,6 +185,38 @@ class Problem(ABC):
         grad = torch.cat([c.gu(x, u) for c in self.constraints[stage_idx]], dim=1)
         return grad
 
+    def evaluate_directional_derivatives(
+        self, guess: SqpSolution, correction: AdmmSolution
+    ):
+        l_dir_deriv = torch.zeros(self.batch_size)
+        # g_dir_deriv = torch.zeros(self.batch_size)
+        for k in range(self.horizon - 1):
+            x_k = guess.x[:, k]
+            u_k = guess.u[:, k]
+            dx_k = correction.dx[:, k]
+            du_k = correction.du[:, k]
+
+            lx_k = self.lx(k, x_k, u_k)
+            lu_k = self.lu(k, x_k, u_k)
+            # gu_k = self.gu(k, x_k, u_k)
+            # gx_k = self.gx(k, x_k, u_k)
+
+            l_dir_deriv += torch.einsum("bj,bj->b", lx_k, dx_k)
+            l_dir_deriv += torch.einsum("bj,bj->b", lu_k, du_k)
+
+            # g_dir_deriv += torch.einsum("bhj,bhj->b", gx_k, dx_k)
+            # g_dir_deriv += torch.einsum("bhj,bhj->b", gu_k, du_k)
+
+        x_f = guess.x[:, -1]
+        dx_f = correction.dx[:, -1]
+        lx_f = self.lx(-1, x_f)
+        # gx_f = self.gx(-1, x_f)
+
+        l_dir_deriv += torch.einsum("bj,bj->b", lx_k, dx_k)
+        # g_dir_deriv += torch.einsum("bj,bj->b", gx_k, gx_k)
+
+        return l_dir_deriv  # , g_dir_deriv
+
     def evaluate_guess(self, solution_guess: SqpSolution):
         """Return total trajectory cost and constraint violation"""
         batch_size = self.batch_size
@@ -192,18 +224,18 @@ class Problem(ABC):
         dt = self.dt
 
         cost = torch.zeros((batch_size))
-        convergence_error = torch.zeros((batch_size))
+        dynamics_viol = torch.zeros((batch_size))
 
-        # Calculate total trajectory cost
-        max_generic_violation = torch.zeros((batch_size))
+        # Calculate total trajectory cost and constraint_violation
+        constr_viols_inf = torch.zeros((batch_size))
         for k in range(horizon - 1):
             cost += self.l(k, solution_guess.x[:, k], solution_guess.u[:, k])
             g_val = self.g(k, solution_guess.x[:, k], solution_guess.u[:, k])
             lb, ub = self.g_bounds(k)
             if g_val is not None:
                 stage_error = torch.cat([relu(lb - g_val), relu(g_val - ub)], dim=1)
-                convergence_error = torch.maximum(
-                    convergence_error, stage_error.max(dim=1).values
+                constr_viols_inf = torch.maximum(
+                    constr_viols_inf, stage_error.max(dim=1).values
                 )
         # Final stage
         cost += self.l(-1, solution_guess.x[:, -1])
@@ -211,27 +243,24 @@ class Problem(ABC):
         lb, ub = self.g_bounds(-1)
         if g_val is not None:
             stage_error = torch.cat([relu(g_val - ub), relu(lb - g_val)], dim=1)
-            convergence_error = torch.maximum(
-                convergence_error, stage_error.max(dim=1).values
+            constr_viols_inf = torch.maximum(
+                constr_viols_inf, stage_error.max(dim=1).values
             )
 
         # Dynamics violation
         x_next = solution_guess.x[:, 1:]
         x_curr = solution_guess.x[:, :-1]
         u_curr = solution_guess.u[:]
-        dynamics_violations = x_next - self.dynamics.f(x_curr, u_curr, dt)
-        max_dynamics_violation = torch.norm(
-            dynamics_violations, p=float("inf"), dim=[1, 2]
-        )
-        convergence_error = torch.maximum(convergence_error, max_dynamics_violation)
+        dyn_viols = x_next - self.dynamics.f(x_curr, u_curr, dt)
+        dyn_viols_inf = torch.norm(dyn_viols, p=float("inf"), dim=[1, 2])
 
         # Underactuation violation
         if self.underactuation is not None:
             uact_violation = self.underactuation.h(x_curr, u_curr)
             max_uact_violation = torch.norm(uact_violation, p=float("inf"), dim=[1, 2])
-            convergence_error = torch.maximum(convergence_error, max_uact_violation)
+            constr_viols_inf = torch.maximum(constr_viols_inf, max_uact_violation)
 
-        return cost, convergence_error
+        return cost, dyn_viols_inf, constr_viols_inf
 
     def linearize(self, solution_guess: SqpSolution, regularization_scale):
         batch_size = self.batch_size

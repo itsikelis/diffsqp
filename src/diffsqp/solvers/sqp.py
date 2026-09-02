@@ -41,6 +41,7 @@ class SqpParameters:
         self.sqp_warm_start_file_name: str = args["sqp_warm_start_file_name"]
         self.sqp_save_solution: str = args["sqp_save_solution"]
         self.sqp_max_iter: int = args["sqp_max_iter"]
+        self.armijo_beta: float = args["armijo_beta"]
         self.merit_mu: float = args["merit_mu"]
         self.ls_max_iter: int = args["ls_max_iter"]
         self.sqp_eps: float = args["sqp_eps"]
@@ -121,11 +122,12 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
     terminated = torch.zeros((batch_size), dtype=torch.bool)
     line_search_fails = 0
     current_guess = initial_guess
-    best_cost, best_constr_inf = problem.evaluate_guess(current_guess)
+    best_cost, best_dyn_inf, best_constr_inf = problem.evaluate_guess(current_guess)
     if parameters.ls_function == "merit":
         # Merit function
         merit_mu = parameters.merit_mu
-        best_phi = best_cost + parameters.merit_mu * best_constr_inf
+        convergence_error = torch.maximum(best_dyn_inf, best_constr_inf)
+        best_phi = best_cost + parameters.merit_mu * convergence_error
 
     sqp_log = SqpSolutionLog()
     admm_solution = None
@@ -133,7 +135,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
 
     # Solve for sqp_max_iter steps
     t_solve_start = time.time()
-    for iter in range(parameters.sqp_max_iter):
+    for sqp_iter in range(parameters.sqp_max_iter):
         try:
             ## Linearize problem ##
             regularization_scale = 10.0**line_search_fails
@@ -146,7 +148,16 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
             # Log admm iterations
             sqp_log.admm_iters.append(admm_log.iterations)
 
+            #################
             ## Line search ##
+            #################
+
+            # Directional Derivative for Armijo check
+            if parameters.ls_function == "merit":
+                l_dir_deriv = problem.evaluate_directional_derivatives(
+                    current_guess, admm_solution
+                )
+
             alpha = torch.ones((batch_size))
             dones = terminated.detach().clone()
             for ls_iter in range(parameters.ls_max_iter):
@@ -161,16 +172,21 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                 )
 
                 # Evaluate current alpha
-                cost, constr_inf = problem.evaluate_guess(new_guess)
+                cost, dyn_inf, constr_inf = problem.evaluate_guess(new_guess)
                 # Backtracking line search option
                 if parameters.ls_function == "filter":
                     cost_improved = cost < best_cost
+                    dyn_inf_improved = dyn_inf < best_dyn_inf
                     constr_inf_improved = constr_inf < best_constr_inf
-                    update_mask = torch.logical_or(cost_improved, constr_inf_improved)
+                    update_mask = cost_improved | dyn_inf_improved | constr_inf_improved
                 # Merit function option
                 elif parameters.ls_function == "merit":
-                    phi = cost + parameters.merit_mu * constr_inf
-                    update_mask = phi < best_phi
+                    convergence_error = torch.maximum(dyn_inf, constr_inf)
+                    phi = cost + parameters.merit_mu * convergence_error
+                    armijo_threshold = (
+                        best_phi + parameters.armijo_beta * alpha * l_dir_deriv
+                    )
+                    update_mask = phi < armijo_threshold
 
                 update_mask = update_mask & ~dones
                 if update_mask.any():
@@ -183,9 +199,19 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                     dones[update_mask] = True
                     # Update best filter and merit candidates
                     best_cost[update_mask] = cost[update_mask]
+                    best_dyn_inf[update_mask] = dyn_inf[update_mask]
                     best_constr_inf[update_mask] = constr_inf[update_mask]
                     if parameters.ls_function == "merit":
                         best_phi[update_mask] = phi[update_mask]
+                    print(
+                        "SQP Iter: ",
+                        sqp_iter,
+                        "LS Iter: ",
+                        ls_iter,
+                        "Conv Error: ",
+                        best_dyn_inf,
+                        best_constr_inf,
+                    )
 
                 # Decrease alpha
                 alpha[~dones] *= 0.5
@@ -224,7 +250,8 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                 du_inf < parameters.sqp_eps,
             )
 
-            constraint_satisfaction = best_constr_inf < parameters.sqp_eps
+            convergence_error = torch.maximum(best_dyn_inf, best_constr_inf)
+            constraint_satisfaction = convergence_error < parameters.sqp_eps
 
             # terminated = torch.logical_and(stationarity, constraint_satisfaction)
             terminated = constraint_satisfaction
@@ -238,7 +265,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
     ## Fill log ##
     ##############
     sqp_log.solve_wall_time_s = t_solve_end - t_solve_start
-    sqp_log.sqp_iterations = iter + 1
+    sqp_log.sqp_iterations = sqp_iter + 1
     sqp_log.envs_terminated = torch.count_nonzero(terminated).item()
     sqp_log.total_cost = best_cost.tolist()
     sqp_log.constraint_violation = best_constr_inf.tolist()
