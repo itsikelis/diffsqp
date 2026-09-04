@@ -1,6 +1,7 @@
 from .generic_constraint import GenericConstraint
 from .underactuation_constraint import UnderactuationConstraint
 from .cartpole_underactuation import CartPoleUnderactuation
+from .quadrotor_underactuation import QuadrotorUnderactuation
 from .acrobot_underactuation import AcrobotUnderactuation
 from .state_bounds import StateBounds
 from .control_bounds import ControlBounds
