@@ -70,7 +70,6 @@ class SqpSolutionLog:
         self.solve_wall_time_s: int = 0
         self.sqp_iterations: int = 0
 
-        self.termination_time_s: float = 0.0
         self.admm_iters: List[float] = []
         self.ls_iters: List[float] = []
         self.ls_alphas: List[float] = []
@@ -100,7 +99,7 @@ class SqpSolutionLog:
             f" Iterations             : {self.sqp_iterations}\n"
             f" Total Cost             : [{cost_str}]\n"
             f" Conv. Error            : [{conv_error_str}]\n"
-            f" Solve Time             : {self.termination_time_s:.4f} s\n"
+            f" Solve Time             : {self.solve_wall_time_s:.4f} s\n"
             f" ADMM Iterations        : [{admm_iters_str}]\n"
             f" Line Search Iterations : [{ls_iters_str}]\n"
             # f" Line Search Alphas : [{alphas_str}]\n"
@@ -203,15 +202,15 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                     best_constr_inf[update_mask] = constr_inf[update_mask]
                     if parameters.ls_function == "merit":
                         best_phi[update_mask] = phi[update_mask]
-                    print(
-                        "SQP Iter: ",
-                        sqp_iter,
-                        "LS Iter: ",
-                        ls_iter,
-                        "Conv Error: ",
-                        best_dyn_inf,
-                        best_constr_inf,
-                    )
+                    # print(
+                    #     "SQP Iter: ",
+                    #     sqp_iter,
+                    #     "LS Iter: ",
+                    #     ls_iter,
+                    #     "Conv Error: ",
+                    #     best_dyn_inf,
+                    #     best_constr_inf,
+                    # )
 
                 # Decrease alpha
                 alpha[~dones] *= 0.5

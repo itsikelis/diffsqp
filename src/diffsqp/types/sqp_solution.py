@@ -1,9 +1,11 @@
-from typing import NamedTuple, Tuple, List, Optional
+from dataclasses import dataclass
+from typing import Tuple, List, Optional
 import torch
 
 
 # Store current sqp result
-class SqpSolution(NamedTuple):
+@dataclass
+class SqpSolution:
     x: torch.Tensor
     u: torch.Tensor
     mu: torch.Tensor
