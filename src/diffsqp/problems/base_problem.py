@@ -18,15 +18,11 @@ class ProblemParameters:
         self.batch_size: int = args["batch_size"]
         self.tf: float = args["tf"]
         self.dt: float = args["dt"]
-        self.n_x: int = len(args["q_w"])
-        self.n_u: int = len(args["r_w"])  # Number of underactuated DoFs
         self.n_h: int = args["n_h"]
         self.horizon = int(self.tf / self.dt)
         # # Initial and final states
-        self.x_init = torch.tensor(args["x_init"]).repeat(self.batch_size, 1)
-        # Apply noise only to the first two dimensions (usually positions)
-        self.x_init[:, 0:2] += args["noise_std"] * torch.randn((self.batch_size, 2))
-        self.x_des = torch.tensor(args["x_des"]).repeat(self.batch_size, 1)
+        self.x_init = torch.tensor(args["x_init"])
+        self.x_des = torch.tensor(args["x_des"])
 
         # State-control bounds
         self.x_lb = torch.tensor(args["x_lb"])
@@ -47,8 +43,6 @@ class ProblemParameters:
             f"  Final Time (tf)         : {self.tf:.3f}\n"
             f"  Time Step (dt)          : {self.dt:.4f}\n"
             f"  Horizon Steps           : {self.horizon}\n"
-            f"  State Dim (nx)          : {self.n_x}\n"
-            f"  Control Dim (nu)        : {self.n_u}\n"
             f"  Underactuation Dim (nh) : {self.n_h}\n"
             f"--------------------------\n"
             f"  State bounds (lower)    : {self.x_lb}\n"
@@ -67,12 +61,12 @@ class Problem(ABC):
     An abstract base class representing a Trajectory Optimization problem.
     """
 
-    def __init__(self, params: ProblemParameters) -> None:
+    def __init__(self, params: ProblemParameters, sys_params) -> None:
         self.inverse_dynamics = params.inverse_dynamics
         self.horizon = params.horizon
         self.dt = params.dt
-        self.n_x = params.n_x
-        self.n_u = params.n_u
+        self.n_x = sys_params.n_x
+        self.n_u = sys_params.n_u
         self.n_h = params.n_h
         self.batch_size = params.batch_size
 

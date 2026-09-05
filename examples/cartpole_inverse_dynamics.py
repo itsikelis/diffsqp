@@ -104,6 +104,12 @@ problem_parameters_dict = {
 }
 problem_parameters = ProblemParameters(**problem_parameters_dict)
 
+# Apply noise to x_init (position only)
+# noise_dim = len(problem_parameters_dict["noise_std"])
+# problem_parameters.x_init[:, :noise_dim] += torch.tensor(
+#     problem_parameters_dict["noise_std"]
+# ) * torch.randn((problem_parameters.batch_size, noise_dim))
+
 system_parameters_dict = {
     "name": "cartpole",
     "n_x": 4,  # Number of state elements

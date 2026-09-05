@@ -3,7 +3,7 @@ import torch
 import yaml
 
 from diffsqp.problems import Problem, ProblemParameters
-from diffsqp.costs import LqrCost
+from diffsqp.costs import LqrCost, QuadrotorTrackingCost, QuadrotorEffortCost
 from diffsqp.solvers import sqp_solve, SqpParameters
 from diffsqp.dynamics import FloatingBaseDynamics
 from diffsqp.dynamics import QuadrotorParameters
@@ -58,12 +58,12 @@ sqp_parameters = SqpParameters(**sqp_parameters_dict)
 problem_parameters_dict = {
     "inverse_dynamics": True,
     "n_h": 2,
-    "batch_size": 32,
+    "batch_size": 2,
     "dt": 0.01,
     "tf": 1.0,
     "x_init": [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     "x_des": [1.0, 0.0, 0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    "noise_std": 0.01,
+    "noise_std": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     # State-control bounds
     "x_lb": [
         -100.0,
@@ -95,14 +95,13 @@ problem_parameters_dict = {
         1e6,
         1e6,
     ],
-    "u_lb": [-20.0, -20.0, -20.0, -20.0, -20.0, -20.0],
-    "u_ub": [20.0, 20.0, 20.0, 20.0, 20.0, 20.0],
+    "u_lb": [-1e6, -1e6, -1e6, -1e6, -1e6, -1e6],
+    "u_ub": [1e6, 1e6, 1e6, 1e6, 1e6, 1e6],
     # Cost weights
     "q_w": [
         1e-8,
         1e-8,
         1e-8,
-        1e-12,
         1e-12,
         1e-12,
         1e-12,
@@ -113,8 +112,8 @@ problem_parameters_dict = {
         1e-8,
         1e-8,
     ],
-    "r_w": [1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3],
-    "qf_w": [1e5, 1e5, 1e5, 1e5, 1e5, 1e5, 1e5, 1e5, 1e5, 1e5, 1e5, 1e5, 1e5],
+    "r_w": [1e-6, 1e-6, 1e-6, 1e-6],
+    "qf_w": [1e5] * 12,
 }
 problem_parameters = ProblemParameters(**problem_parameters_dict)
 
@@ -144,7 +143,7 @@ dynamics = FloatingBaseDynamics(
 underactuation = QuadrotorUnderactuation(system_parameters)
 
 # Create problem
-problem = Problem(problem_parameters)
+problem = Problem(problem_parameters, system_parameters)
 
 initial_guess = SqpSolution(
     x=torch.zeros((problem.batch_size, problem.horizon, problem.n_x)),
@@ -160,25 +159,36 @@ if sqp_parameters.sqp_warm_start:
     intial_guess.x = x
     intial_guess.u = u
 else:
-    # Initialize x
-    for k in range(problem.horizon - 1):
-        initial_guess.x[:, k] = problem_parameters.x_init.detach().clone()
-    initial_guess.x[:, -1] = problem_parameters.x_des.detach().clone()
+    x_init_tensor = problem_parameters.x_init.detach().clone()
+    x_des_tensor = problem_parameters.x_des.detach().clone()
+
+    initial_guess.x[:] = x_init_tensor
+    alphas = torch.linspace(
+        0, 1, problem.horizon, device=x_init_tensor.device
+    ).unsqueeze(1)
+    pos_traj = (1.0 - alphas) * x_init_tensor[0:3] + alphas * x_des_tensor[0:3]
+    initial_guess.x[:, :, 0:3] = pos_traj
+    initial_guess.x[:, -1] = x_des_tensor
+
+plot_trajectories(initial_guess.x, initial_guess.u)
 
 # Costs
-Q = problem_parameters.q_w * torch.eye(dynamics.nx).repeat(
-    problem_parameters.batch_size, 1, 1
-)
-R = problem_parameters.r_w * torch.eye(dynamics.nu).repeat(
-    problem_parameters.batch_size, 1, 1
-)
-Qf = problem_parameters.qf_w * torch.eye(dynamics.nx).repeat(
-    problem_parameters.batch_size, 1, 1
-)
+Q = 1e-12 * torch.eye(dynamics.nx).repeat(problem_parameters.batch_size, 1, 1)
+R = 1e-4 * torch.eye(dynamics.nu).repeat(problem_parameters.batch_size, 1, 1)
+Qf = 1e2 * torch.eye(dynamics.nx).repeat(problem_parameters.batch_size, 1, 1)
 
 # Set stage costs, constraints and initial guess
 for k in range(problem.horizon - 1):
-    problem.costs.append([LqrCost(Q=Q, R=R)])
+    problem.costs.append(
+        [
+            LqrCost(Q=Q, R=R),
+            QuadrotorEffortCost(system_parameters, problem_parameters.r_w),
+            QuadrotorTrackingCost(
+                Q_diag=problem_parameters.q_w,
+                x_des=problem_parameters.x_init.detach().clone(),
+            ),
+        ]
+    )
     problem.constraints[k] = [
         StateBounds(
             problem.n_x,
@@ -195,7 +205,15 @@ for k in range(problem.horizon - 1):
         # QuadrotorUnderactuation(system_parameters),
     ]
 # Terminal stage
-problem.costs.append([LqrCost(Q=Qf, x_des=problem_parameters.x_des.detach().clone())])
+problem.costs.append(
+    [
+        LqrCost(Q=Qf, x_des=problem_parameters.x_des.detach().clone()),
+        QuadrotorTrackingCost(
+            Q_diag=problem_parameters.qf_w,
+            x_des=problem_parameters.x_des.detach().clone(),
+        ),
+    ]
+)
 problem.constraints[-1] = [
     StateBounds(
         problem.n_x,
@@ -225,7 +243,7 @@ animator = QuadrotorAnimator(
     problem_parameters.dt,
     problem_parameters.batch_size,
 )
-# animator.animate(step_size=2)
-animator.save(filename="quadrotor.mp4", step_size=2)
+animator.animate(step_size=2)
+# animator.save(filename="quadrotor.mp4", step_size=2)
 
 plt.show()
