@@ -2,18 +2,22 @@ import torch
 
 
 class Dynamics:
-    def __init__(self, nx, nu, nq, nv):
+    def __init__(self, nx, nu, nq, nv, use_semi_implicit=True):
         self.nx = nx
         self.nu = nu
         self.nq = nq
         self.nv = nv
+
+        self.use_semi_implicit = use_semi_implicit
 
     def f(self, x: torch.Tensor, u: torch.Tensor, dt: float) -> torch.Tensor:
         """
         Discrete-time dynamics: x_k+1 = f(x_k, u_k)
         """
         x_dot = self.fc(x, u)
-        # return x + dt * self.fc(x, u)
+
+        if not self.use_semi_implicit:
+            return x + dt * self.fc(x, u)
 
         E = self.calc_semi_impl_matrix_(dt)
         return x + torch.einsum("ij,...j->...i", E, x_dot)
@@ -22,7 +26,9 @@ class Dynamics:
         """
         State Jacobian: df/dx
         """
-        # return torch.add(dt * self.fcx(x, u), torch.eye(self.nx))
+
+        if not self.use_semi_implicit:
+            return torch.eye(self.nx) + dt * self.fcx(x, u)
 
         E = self.calc_semi_impl_matrix_(dt)
 
@@ -35,7 +41,9 @@ class Dynamics:
         """
         Control Jacobian: df/du
         """
-        # return dt * self.fcu(x, u)
+
+        if not self.use_semi_implicit:
+            return dt * self.fcu(x, u)
 
         E = self.calc_semi_impl_matrix_(dt)
 

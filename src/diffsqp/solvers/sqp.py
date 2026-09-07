@@ -37,9 +37,6 @@ class SqpParameters:
         self.admm_rel_tolerance_final = args["admm_rel_tolerance_final"]
         self.admm_tolerance_update_steps = args["admm_tolerance_update_steps"]
 
-        self.sqp_warm_start: float = args["sqp_warm_start"]
-        self.sqp_warm_start_file_name: str = args["sqp_warm_start_file_name"]
-        self.sqp_save_solution: str = args["sqp_save_solution"]
         self.sqp_max_iter: int = args["sqp_max_iter"]
         self.armijo_beta: float = args["armijo_beta"]
         self.merit_mu: float = args["merit_mu"]
@@ -252,8 +249,8 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
             convergence_error = torch.maximum(best_dyn_inf, best_constr_inf)
             constraint_satisfaction = convergence_error < parameters.sqp_eps
 
-            # terminated = torch.logical_and(stationarity, constraint_satisfaction)
-            terminated = constraint_satisfaction
+            terminated = torch.logical_and(stationarity, constraint_satisfaction)
+            # terminated = constraint_satisfaction
             if terminated.all():
                 break
         except KeyboardInterrupt:
