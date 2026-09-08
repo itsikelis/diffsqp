@@ -3,6 +3,7 @@ import torch
 import bard
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 from diffsqp.problems import Problem, ProblemParameters
 from diffsqp.costs import LqrCost, Cost
@@ -59,11 +60,6 @@ class KinematicDynamics(Dynamics):
         return I.expand(batch_size, self.nx, self.nu)
 
 
-#####################################
-# Custom end-effector tracking cost #
-#####################################
-
-
 class EndEffectorTrackingCost(Cost):
     """
     Weighted squared pose error cost utilizing bard forward kinematics.
@@ -87,12 +83,12 @@ class EndEffectorTrackingCost(Cost):
         transforms = bard.forward_kinematics(self.model, self.data, self.eef_id, q=x)
         T_ref = self.T_ref.to(device=x.device, dtype=x.dtype)
 
-        # 1. Position Error (3D)
+        # Position error (3D)
         p_ee = transforms[..., :3, 3]
         p_ref = T_ref[..., :3, 3]
         pos_err = p_ee - p_ref
 
-        # 2. Orientation Error (3D) using SO(3) skew-symmetric mapping
+        # Orientation error using SO(3) skew-symmetric mapping
         R_ee = transforms[..., :3, :3]
         R_ref = T_ref[..., :3, :3]
 
@@ -104,7 +100,6 @@ class EndEffectorTrackingCost(Cost):
         # Extract the vector part (vee operator) from the skew-symmetric matrix S
         ori_err = 0.5 * torch.stack([S[..., 2, 1], S[..., 0, 2], S[..., 1, 0]], dim=-1)
 
-        # Combine into a 6D error vector
         return torch.cat([pos_err, ori_err], dim=-1)
 
     def l(self, x: torch.Tensor, u: torch.Tensor = None) -> torch.Tensor:
@@ -161,13 +156,15 @@ class EndEffectorTrackingCost(Cost):
 
 
 def main(args):
-    device = "cuda"
-    torch.set_default_device("cuda")
-    batch_size = args.b
-    model = bard.build_model_from_urdf("fp3.urdf", floating_base=False)
+    device = args.device
+    torch.set_default_device(device)
+    batch_size = args.batch_size
+
+    BASE_DIR = Path(__file__).resolve().parent.parent.parent
+    urdf_path = BASE_DIR / "resources" / "robots" / "fp3.urdf"
+    model = bard.build_model_from_urdf(urdf_path, floating_base=False)
     model.to(dtype=torch.float32, device=device)
     data = bard.create_data(model, max_batch_size=batch_size)
-    eef_id = model.get_frame_id("fp3_link7")
 
     sqp_parameters = SqpParameters(
         **{
@@ -207,7 +204,7 @@ def main(args):
             "dt": 0.01,
             "x_init": [0.0, 0.0, 0.0, -torch.pi / 2.0, 0.0, torch.pi / 2.0, 0.0],
             "x_des": [0.0, 0.0, 0.2, -torch.pi / 2.0, 0.0, torch.pi / 2.0, 0.0],
-            "noise_std": 0.0,
+            "noise_std": [0.1] * 7,
             "x_lb": [-1e6] * 7,
             "x_ub": [1e6] * 7,
             "u_lb": [-1e6] * 7,
@@ -230,30 +227,38 @@ def main(args):
 
     T_ref = torch.tensor(
         [
-            [9.9500e-01, -4.0467e-16, 9.9833e-02, 6.9161e-01],
-            [-4.7893e-16, -1.0000e00, 7.1989e-16, -6.7600e-17],
-            [9.9833e-02, -7.6411e-16, -9.9500e-01, 4.5008e-01],
-            [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
+            [0.4947, -0.7662, -0.4101, 0.2967],
+            [-0.3802, 0.2336, -0.8949, -0.6123],
+            [0.7815, 0.5987, -0.1757, 0.6924],
+            [0.0000, 0.0000, 0.0000, 1.0000],
         ]
     )
 
-    # T_ref = torch.tensor(
-    #     [
-    #         [
-    #             [9.9500e-01, -4.0467e-16, 9.9833e-02, 6.9161e-01],
-    #             [-4.7893e-16, -1.0000e00, 7.1989e-16, -6.7600e-17],
-    #             [9.9833e-02, -7.6411e-16, -9.9500e-01, 4.5008e-01],
-    #             [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
-    #         ],
-    #         [
-    #             [9.8007e-01, 1.5816e-01, -1.2023e-01, 5.4345e-01],
-    #             [1.9867e-01, -7.8022e-01, 5.9312e-01, 1.1016e-01],
-    #             [-2.6876e-16, -6.0519e-01, -7.9608e-01, 7.3150e-01],
-    #             [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
-    #         ],
-    #     ]
-    # )
+    x_ref = torch.tensor([-0.8000, 0.6400, -0.7400, -0.9700, -0.7400, 2.4800, 0.5300])
+
+    # q:  [-0.8000,  0.6400, -0.7400, -0.9700, -0.7400,  2.4800,  0.5300]
+    # tf: [[ 0.4947, -0.7662, -0.4101,  0.2967],
+    #      [-0.3802,  0.2336, -0.8949, -0.6123],
+    #      [ 0.7815,  0.5987, -0.1757,  0.6924],
+    #      [ 0.0000,  0.0000,  0.0000,  1.0000]]
+    # q: [0.0000,  0.5900,  0.6400, -2.0600,  0.9900,  0.8700,  0.0000]
+    # tf: [[-0.3022, -0.4001, -0.8652,  0.3961],
+    #      [ 0.7360, -0.6747,  0.0549,  0.3396],
+    #      [-0.6057, -0.6202,  0.4984,  0.2475],
+    #      [ 0.0000,  0.0000,  0.0000,  1.0000]]
+    # q: [0.2400, 1.2800, 0.4700, 0.5300, 0.2400, 1.6200, 1.1000]
+    # tf: [[ 0.7385, -0.4170,  0.5299,  0.6000],
+    #      [-0.6490, -0.2266,  0.7263,  0.0382],
+    #      [-0.1828, -0.8802, -0.4379,  0.7245],
+    #      [ 0.0000,  0.0000,  0.0000,  1.0000]]
+    # q: [0.2400, -0.2800, -1.4300,  1.1000, -1.6600,  1.6200, -0.3900]
+    # tf: [[-0.4319, -0.0130, -0.9018, -0.2563],
+    #      [ 0.5582,  0.7815, -0.2786,  0.3205],
+    #      [ 0.7085, -0.6237, -0.3302,  0.7587],
+    #      [ 0.0000,  0.0000,  0.0000,  1.0000]]
+
     Q_ee_diag = torch.tensor([1e3, 1e3, 1e3, 1e2, 1e2, 1e2])
+    eef_id = model.get_frame_id("fp3_link7")
     ee_cost = EndEffectorTrackingCost(model, data, eef_id, T_ref, Q_ee_diag)
 
     # Control penalty (velocity minimization)
@@ -267,7 +272,6 @@ def main(args):
 
     if args.load:
         x, u = load_solution(args.load, device=device)
-        # u = torch.zeros((problem.batch_size, problem.horizon - 1, problem.n_u))
     else:
         x = problem_parameters.x_init.clone().expand(
             batch_size, problem.horizon, problem.n_x
@@ -282,7 +286,14 @@ def main(args):
         ksi=[None] * problem.horizon,
     )
 
+    # Set Initial state
     initial_guess.x[:, 0] = problem_parameters.x_init.clone()
+    noise_std = problem_parameters.noise_std
+    noise_dim = problem_parameters.noise_std.shape[0]
+    initial_guess.x[:, 0] += torch.tensor(noise_std) * torch.randn(
+        (batch_size, noise_dim)
+    )
+
     for k in range(problem.horizon - 1):
         problem.costs.append(
             [
@@ -328,14 +339,15 @@ def main(args):
 
     if args.save:
         print("Saving")
-        save_solution(solution, args.save)
+        save_solution(solution, args.save, x_des=x_ref)
 
     plt.show()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-b", type=int, help="Batch size", default=1)
+    parser.add_argument("-batch_size", type=int, help="Batch size", default=1)
+    parser.add_argument("-device", type=str, help="Batch size", default="cpu")
     parser.add_argument("-save", type=str, help="Filename to save result")
     parser.add_argument("-load", type=str, help="Filename to load result")
     main(parser.parse_args())

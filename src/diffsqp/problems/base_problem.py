@@ -23,6 +23,7 @@ class ProblemParameters:
         # # Initial and final states
         self.x_init = torch.tensor(args["x_init"])
         self.x_des = torch.tensor(args["x_des"])
+        self.noise_std = torch.tensor(args["noise_std"])
 
         # State-control bounds
         self.x_lb = torch.tensor(args["x_lb"])

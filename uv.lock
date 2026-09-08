@@ -24,6 +24,16 @@ wheels = [
 ]
 
 [[package]]
+name = "bard"
+version = "0.4.3"
+source = { git = "https://github.com/YueWang996/bard-pytorch-dynamics#d272de725500a4fe8ea815cba33614f5ba06759a" }
+dependencies = [
+    { name = "lxml" },
+    { name = "numpy" },
+    { name = "pyyaml" },
+]
+
+[[package]]
 name = "certifi"
 version = "2026.1.4"
 source = { registry = "https://pypi.org/simple" }
@@ -309,6 +319,7 @@ name = "diffsqp"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "bard" },
     { name = "cvxpylayers" },
     { name = "matplotlib" },
     { name = "opt-einsum" },
@@ -320,6 +331,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "bard", git = "https://github.com/YueWang996/bard-pytorch-dynamics" },
     { name = "cvxpylayers", specifier = ">=1.0.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "opt-einsum", specifier = ">=3.4.0" },
