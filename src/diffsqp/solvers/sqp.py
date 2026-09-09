@@ -67,9 +67,11 @@ class SqpSolutionLog:
         self.solve_wall_time_s: int = 0
         self.sqp_iterations: int = 0
 
-        self.admm_iters: List[float] = []
-        self.ls_iters: List[float] = []
-        self.ls_alphas: List[float] = []
+        self.admm_iter_hist: List[float] = []
+        self.ls_iter_hist: List[float] = []
+        self.cost_hist: List[List[float]] = []
+        self.dynamics_violation_hist: List[List[float]] = []
+        self.constraint_violation_hist: List[float] = []
 
         # GPU related
         self.cuda_reserved_bytes: int = 0
@@ -78,17 +80,23 @@ class SqpSolutionLog:
     def __str__(self) -> str:
         cuda_res_mb = self.cuda_reserved_bytes / (1024**2)
         cuda_alc_mb = self.cuda_allocated_bytes / (1024**2)
-        cost_str = ", ".join([f"{a:.2e}" for a in self.total_cost[-5:]])
-        if len(self.total_cost) > 5:
-            cost_str = f"... {cost_str}"
-        conv_error_str = ", ".join([f"{a:.2e}" for a in self.constraint_violation[-5:]])
-        if len(self.constraint_violation) > 5:
-            conv_error_str = f"... {conv_error_str}"
-        admm_iters_str = ", ".join([f"{a}" for a in self.admm_iters[:]])
-        ls_iters_str = ", ".join([f"{a}" for a in self.ls_iters[:]])
-        alphas_str = ", ".join([f"{a:.4f}" for a in self.ls_alphas[-5:]])
-        if len(self.ls_alphas) > 5:
-            alphas_str = f"... {alphas_str}"
+
+        # Helper to safely extract medians from batched tensors
+        def get_medians(hist):
+            return [torch.median(x).item() for x in hist]
+
+        # Helper to format lists (displays up to the last 5 elements)
+        def fmt_list(lst, fmt="{:.2e}"):
+            s = ", ".join([fmt.format(a) for a in lst[-5:]])
+            return f"... {s}" if len(lst) > 5 else s
+
+        # Apply formatting
+        cost_str = fmt_list(self.total_cost)
+        conv_error_str = fmt_list(self.constraint_violation)
+
+        # Note: Fixed the attribute names to match your __init__ (admm_iter_hist instead of admm_iters)
+        admm_iters_str = fmt_list(self.admm_iter_hist, fmt="{}")
+        ls_iters_str = fmt_list(self.ls_iter_hist, fmt="{}")
 
         return (
             f"=== SQP Solution Log ===\n"
@@ -99,7 +107,6 @@ class SqpSolutionLog:
             f" Solve Time             : {self.solve_wall_time_s:.4f} s\n"
             f" ADMM Iterations        : [{admm_iters_str}]\n"
             f" Line Search Iterations : [{ls_iters_str}]\n"
-            # f" Line Search Alphas : [{alphas_str}]\n"
             f" CUDA Allocated         : {cuda_alc_mb:.2f} MB\n"
             f" CUDA Reserved          :  {cuda_res_mb:.2f} MB\n"
             f"========================="
@@ -107,8 +114,7 @@ class SqpSolutionLog:
 
     def save_to_json(self, filepath: str) -> None:
         """Saves the current state of the log to a JSON file."""
-        print(self.__dict__)
-        with open(filepath, "w", encoding="utf-8") as f:
+        with open(filepath + ".json", "w", encoding="utf-8") as f:
             json.dump(self.__dict__, f, indent=4)
 
 
@@ -143,9 +149,6 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
             admm_solution, admm_log = admm_qp_solve(
                 problem, parameters, mat, admm_solution
             )
-
-            # Log admm iterations
-            sqp_log.admm_iters.append(admm_log.iterations)
 
             #################
             ## Line search ##
@@ -211,6 +214,8 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                     #     sqp_iter,
                     #     "LS Iter: ",
                     #     ls_iter,
+                    #     "Cost: ",
+                    #     best_cost,
                     #     "Conv Error: ",
                     #     best_dyn_inf,
                     #     best_constr_inf,
@@ -223,10 +228,16 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                     line_search_fails = 0
                     break
 
-            sqp_log.ls_iters.append(ls_iter + 1)
             if ls_iter == parameters.ls_max_iter - 1:
                 print("Line search failed")
                 line_search_fails += 1
+
+            # Iteration log #
+            sqp_log.admm_iter_hist.append(admm_log.iterations)
+            sqp_log.ls_iter_hist.append(ls_iter + 1)
+            sqp_log.cost_hist.append(best_cost.tolist())
+            sqp_log.dynamics_violation_hist.append(best_dyn_inf.tolist())
+            sqp_log.constraint_violation_hist.append(best_constr_inf.tolist())
 
             #######################
             ## Check termination ##
