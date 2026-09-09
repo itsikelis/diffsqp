@@ -118,7 +118,10 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
     terminated = torch.zeros((batch_size), dtype=torch.bool)
     line_search_fails = 0
     current_guess = initial_guess
-    best_cost, best_dyn_inf, best_constr_inf = problem.evaluate_guess(current_guess)
+    # Cost, Dynamics Violation, Constraint Violation, Complementarity Slackness
+    best_cost, best_dyn_inf, best_constr_inf, best_comp_inf = problem.evaluate_guess(
+        current_guess
+    )
     if parameters.ls_function == "merit":
         # Merit function
         merit_mu = parameters.merit_mu
@@ -168,12 +171,15 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                 )
 
                 # Evaluate current alpha
-                cost, dyn_inf, constr_inf = problem.evaluate_guess(new_guess)
+                cost, dyn_inf, constr_inf, comp_inf = problem.evaluate_guess(new_guess)
                 # Backtracking line search option
                 if parameters.ls_function == "filter":
                     cost_improved = cost < best_cost
                     dyn_inf_improved = dyn_inf < best_dyn_inf
                     constr_inf_improved = constr_inf < best_constr_inf
+                    # print(
+                    #     f"Cost:, {cost.tolist()} \ {best_cost.tolist()} Dyn inf: {dyn_inf.tolist()} \ {best_dyn_inf.tolist()} Dyn inf: {constr_inf.tolist()} \ {best_constr_inf.tolist()}"
+                    # )
                     update_mask = cost_improved | dyn_inf_improved | constr_inf_improved
                 # Merit function option
                 elif parameters.ls_function == "merit":
@@ -197,6 +203,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                     best_cost[update_mask] = cost[update_mask]
                     best_dyn_inf[update_mask] = dyn_inf[update_mask]
                     best_constr_inf[update_mask] = constr_inf[update_mask]
+                    best_comp_inf[update_mask] = comp_inf[update_mask]
                     if parameters.ls_function == "merit":
                         best_phi[update_mask] = phi[update_mask]
                     # print(
@@ -249,8 +256,11 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
             convergence_error = torch.maximum(best_dyn_inf, best_constr_inf)
             constraint_satisfaction = convergence_error < parameters.sqp_eps
 
-            terminated = torch.logical_and(stationarity, constraint_satisfaction)
-            # terminated = constraint_satisfaction
+            complementarity = best_comp_inf < parameters.sqp_eps
+
+            terminated = stationarity & constraint_satisfaction & complementarity
+            # terminated = constraint_satisfaction & complementarity
+
             if terminated.all():
                 break
         except KeyboardInterrupt:

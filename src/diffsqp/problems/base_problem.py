@@ -23,7 +23,7 @@ class ProblemParameters:
         # # Initial and final states
         self.x_init = torch.tensor(args["x_init"])
         self.x_des = torch.tensor(args["x_des"])
-        self.noise_std = torch.tensor(args["noise_std"])
+        self.noise_std = args["noise_std"]
 
         # State-control bounds
         self.x_lb = torch.tensor(args["x_lb"])
@@ -214,15 +214,19 @@ class Problem(ABC):
 
     def evaluate_guess(self, solution_guess: SqpSolution):
         """Return total trajectory cost and constraint violation"""
+        device = solution_guess.x.device
         batch_size = self.batch_size
         horizon = self.horizon
         dt = self.dt
 
         cost = torch.zeros((batch_size))
         dynamics_viol = torch.zeros((batch_size))
+        cost = torch.zeros((batch_size), device=device)
+        dynamics_viol = torch.zeros((batch_size), device=device)
 
         # Calculate total trajectory cost and constraint_violation
-        constr_viols_inf = torch.zeros((batch_size))
+        constr_viols_inf = torch.zeros((batch_size), device=solution_guess.x.device)
+        comp_viols_inf = torch.zeros((batch_size), device=solution_guess.x.device)
         for k in range(horizon - 1):
             cost += self.l(k, solution_guess.x[:, k], solution_guess.u[:, k])
             g_val = self.g(k, solution_guess.x[:, k], solution_guess.u[:, k])
@@ -232,6 +236,19 @@ class Problem(ABC):
                 constr_viols_inf = torch.maximum(
                     constr_viols_inf, stage_error.max(dim=1).values
                 )
+                # Complementarity Slackness Violation
+                if solution_guess.ksi[k] is not None:
+                    ksi_k = solution_guess.ksi[k]
+                    # Complementarity: dual * slack = 0
+                    # For upper bound: max(ksi, 0) * (ub - g)
+                    # For lower bound: min(ksi, 0) * (g - lb)
+                    comp_ub = torch.abs(relu(ksi_k) * (ub - g_val))
+                    comp_lb = torch.abs(relu(-ksi_k) * (g_val - lb))
+                    comp_error = torch.cat([comp_ub, comp_lb], dim=1)
+                    comp_viols_inf = torch.maximum(
+                        comp_viols_inf, comp_error.max(dim=1).values
+                    )
+
         # Final stage
         cost += self.l(-1, solution_guess.x[:, -1])
         g_val = self.g(-1, solution_guess.x[:, -1])
@@ -241,6 +258,14 @@ class Problem(ABC):
             constr_viols_inf = torch.maximum(
                 constr_viols_inf, stage_error.max(dim=1).values
             )
+            if solution_guess.ksi[-1] is not None:
+                ksi_f = solution_guess.ksi[-1]
+                comp_ub = torch.abs(relu(ksi_f) * (ub - g_val))
+                comp_lb = torch.abs(relu(-ksi_f) * (g_val - lb))
+                comp_error = torch.cat([comp_ub, comp_lb], dim=1)
+                comp_viols_inf = torch.maximum(
+                    comp_viols_inf, comp_error.max(dim=1).values
+                )
 
         # Dynamics violation
         x_next = solution_guess.x[:, 1:]
@@ -255,7 +280,7 @@ class Problem(ABC):
             max_uact_violation = torch.norm(uact_violation, p=float("inf"), dim=[1, 2])
             constr_viols_inf = torch.maximum(constr_viols_inf, max_uact_violation)
 
-        return cost, dyn_viols_inf, constr_viols_inf
+        return cost, dyn_viols_inf, constr_viols_inf, comp_viols_inf
 
     def linearize(self, solution_guess: SqpSolution, regularization_scale):
         batch_size = self.batch_size
