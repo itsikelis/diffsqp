@@ -9,7 +9,7 @@ def save_solution(solution: SqpSolution, filepath: str, x_des=None) -> None:
     # This ensures you won't get CUDA errors if you try to load them on
     # a machine with a different GPU setup or no GPU at all.
     batch_size = solution.x.shape[0]
-    if len(x_des.shape == 2):
+    if len(x_des.shape) == 1:
         x_des_save = x_des.detach().cpu().repeat(batch_size, 1)
     else:
         x_des_save = x_des.detach().cpu()
@@ -18,8 +18,8 @@ def save_solution(solution: SqpSolution, filepath: str, x_des=None) -> None:
         "u": solution.u.detach().cpu(),
         "x_des": x_des_save,
     }
-    torch.save(data, filepath)
-    print(f"Trajectory saved to {filepath}.")
+    torch.save(data, filepath + ".pt")
+    print(f"Trajectory saved to {filepath+ ".pt"}.")
 
 
 def load_solution(
