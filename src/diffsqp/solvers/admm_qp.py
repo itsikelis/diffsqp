@@ -5,7 +5,7 @@ from diffsqp.solvers import lqr_solve
 from diffsqp.types import AdmmSolution, AdmmLog, QpParameters
 
 
-def update_rho(problem, parameters, solution, residuals):
+def update_rho(problem, parameters, solution, residuals, dones):
     horizon = problem.horizon
     norm_prim, norm_prim_rel, norm_dual, norm_dual_rel = residuals
     rho_common = solution.rho_common
@@ -21,6 +21,9 @@ def update_rho(problem, parameters, solution, residuals):
     tol = parameters.admm_adaptive_rho_tolerance
     update_mask = (rho_estimate > rho_common * tol) | (rho_estimate < rho_common / tol)
 
+    # Mask out environments that are already done
+    update_mask = update_mask & ~dones
+
     # If no batch elements require an update, exit early
     if not update_mask.any().item():
         return False
@@ -33,7 +36,7 @@ def update_rho(problem, parameters, solution, residuals):
 
     for k in range(horizon):
         lb, ub = problem.g_bounds(k)
-        n_g = lb.shape[-1]  # Get the number of constraints (e.g., 7)
+        n_g = lb.shape[-1]
 
         # Identify constraint types based on bounds
         is_unbounded = (lb <= -1e6) & (ub >= 1e6)
@@ -72,14 +75,11 @@ def check_termination(parameters, admm_iter, residuals, abs_tol, rel_tol):
 
     # print(tol_prim, tol_dual)
 
-    if torch.all(norm_prim <= tol_prim) and torch.all(norm_dual <= tol_dual):
-        return True
-
-    return False
+    return (norm_prim <= tol_prim) & (norm_dual <= tol_dual)
 
 
 def proximal_step_and_residuals(
-    problem, parameters, solution, lqr_mat, lqr_solution, z_prev
+    problem, parameters, solution, lqr_mat, lqr_solution, z_prev, dones
 ):
     alpha = parameters.admm_alpha
     batch_size = problem.batch_size
@@ -103,18 +103,22 @@ def proximal_step_and_residuals(
             N_k = lqr_mat.N[k]
             du_hat_k = lqr_solution.du[:, k]
 
+        # (!) Using torch.where and not boolean masking avoids gather/scatter operations in the GPU
+
         # ------------------------------------- #
         # dx = alpha * dx_hat + (1-alpha) * dx  #
         # ------------------------------------- #
-        solution.dx[:, k] *= 1.0 - alpha
-        solution.dx[:, k] += alpha * dx_hat_k
+        new_dx = alpha * dx_hat_k + (1.0 - alpha) * solution.dx[:, k]
+        solution.dx[:, k] = torch.where(dones.unsqueeze(1), solution.dx[:, k], new_dx)
 
         # ------------------------------------- #
         # du = alpha * du_hat + (1-alpha) * du  #
         # ------------------------------------- #
         if k < horizon - 1:
-            solution.du[:, k] *= 1.0 - alpha
-            solution.du[:, k] += alpha * du_hat_k
+            new_du = alpha * du_hat_k + (1.0 - alpha) * solution.du[:, k]
+            solution.du[:, k] = torch.where(
+                dones.unsqueeze(1), solution.du[:, k], new_du
+            )
 
         # If no generic stage constraints -> continue
         if M_k is None:
@@ -132,23 +136,24 @@ def proximal_step_and_residuals(
         # ---------------------------------------- #
         # z = clamp(z_hat + rho_inv * ksi, lb, ub) #
         # ---------------------------------------- #
-        solution.z[k] = torch.clamp(
+        new_z = torch.clamp(
             z_hat + torch.einsum("...ii,...i->...i", Diag_rho_inv, solution.ksi[k]),
             lb,
             ub,
         )
+        solution.z[k] = torch.where(dones.unsqueeze(1), solution.z[k], new_z)
 
         # ----------------------------- #
         # ksi = ksi + rho ∘ (z_hat - z) #
         # ----------------------------- #
-        solution.ksi[k] = solution.ksi[k] + torch.einsum(
+        new_ksi = solution.ksi[k] + torch.einsum(
             "...ii,...i->...i", Diag_rho, z_hat - solution.z[k]
         )
+        solution.ksi[k] = torch.where(dones.unsqueeze(1), solution.ksi[k], new_ksi)
 
         ### Residual Calculation ###
         dx_k = solution.dx[:, k]
-        if k < horizon - 1:
-            du_k = solution.du[:, k]
+        du_k = solution.du[:, k] if k < horizon - 1 else None
         z_k = solution.z[k]
         ksi_k = solution.ksi[k]
 
@@ -162,15 +167,15 @@ def proximal_step_and_residuals(
         # r_dual = = max(r_dual, M^T * z_diff_scaled, N^T * z_diff_scaled) #
         # ---------------------------------------------------------------- #
         r_dual_x = torch.einsum("...ji,...j->...i", M_k, z_diff_scaled_k)
-        norm_dual = torch.maximum(
-            norm_dual,
-            torch.norm(r_dual_x, p=float("inf"), dim=1),
-        )
+        norm_dual_k = torch.norm(r_dual_x, p=float("inf"), dim=1)
+
         if k < horizon - 1:
             r_dual_u = torch.einsum("...ji,...j->...i", N_k, z_diff_scaled_k)
-            norm_dual = torch.maximum(
-                norm_dual, torch.norm(r_dual_u, p=float("inf"), dim=1)
+            norm_dual_k = torch.maximum(
+                norm_dual_k, torch.norm(r_dual_u, p=float("inf"), dim=1)
             )
+
+        norm_dual = torch.where(dones, norm_dual, torch.maximum(norm_dual, norm_dual_k))
 
         # ---------------------------- #
         # r_prim = M * dx + N * du - z #
@@ -181,38 +186,39 @@ def proximal_step_and_residuals(
 
         prim_res_k = MdxNdu - z_k
 
-        norm_prim = torch.maximum(
-            norm_prim, torch.norm(prim_res_k, p=float("inf"), dim=1)
-        )
+        norm_prim_k = torch.norm(prim_res_k, p=float("inf"), dim=1)
+        norm_prim = torch.where(dones, norm_prim, torch.maximum(norm_prim, norm_prim_k))
 
         # -------------------------------------------- #
         # r_prim_rel = max(r_prim, M * dx + N * du, z) #
         # -------------------------------------------- #
-        norm_prim_rel = torch.maximum(
-            norm_prim_rel,
-            torch.maximum(
-                torch.norm(MdxNdu, p=float("inf"), dim=1),
-                torch.norm(z_k, p=float("inf"), dim=1),
-            ),
+        norm_prim_rel_k = torch.maximum(
+            torch.norm(MdxNdu, p=float("inf"), dim=1),
+            torch.norm(z_k, p=float("inf"), dim=1),
+        )
+        norm_prim_rel = torch.where(
+            dones, norm_prim_rel, torch.maximum(norm_prim_rel, norm_prim_rel_k)
         )
 
         # ---------------------------------------------- #
         # r_dual_rel = max(r_dual, M^T * ksi, N^T * ksi) #
         # ---------------------------------------------- #
         x_k_rel = torch.einsum("...ji,...j->...i", M_k, ksi_k)
-        norm_dual_rel = torch.maximum(
-            norm_dual_rel,
-            torch.norm(x_k_rel, p=float("inf"), dim=1),
-        )
+        norm_dual_rel_k = torch.norm(x_k_rel, p=float("inf"), dim=1)
+
         if k < horizon - 1:
             u_k_rel = torch.einsum("...ji,...j->...i", N_k, ksi_k)
-            norm_dual_rel = torch.maximum(
-                norm_dual_rel,
+            norm_dual_rel_k = torch.maximum(
+                norm_dual_rel_k,
                 torch.norm(u_k_rel, p=float("inf"), dim=1),
             )
 
-        # IMPORTANT: Update z_prev
-        z_prev[k].copy_(z_k)
+        norm_dual_rel = torch.where(
+            dones, norm_dual_rel, torch.maximum(norm_dual_rel, norm_dual_rel_k)
+        )
+
+        # IMPORTANT: Update z_prev only for unfinished environments
+        z_prev[k][~dones] = z_k[~dones]
 
     return norm_prim, norm_prim_rel, norm_dual, norm_dual_rel
 
@@ -416,6 +422,9 @@ def admm_qp_solve(problem, parameters, lqr_mat, previous_solution=None):
         for k in range(problem.horizon)
     ]
 
+    # Boolean mask to track terminated envs
+    dones = torch.zeros(problem.batch_size, dtype=torch.bool)
+
     # Prepare solution struct
     solution = new_solution(problem, parameters, lqr_mat, previous_solution)
 
@@ -435,17 +444,21 @@ def admm_qp_solve(problem, parameters, lqr_mat, previous_solution=None):
 
         # Proximal step and residual update
         residuals = proximal_step_and_residuals(
-            problem, parameters, solution, lqr_mat, lqr_solution, z_prev
+            problem, parameters, solution, lqr_mat, lqr_solution, z_prev, dones
         )
 
         # Check for termination
-        if check_termination(
+        new_dones = check_termination(
             parameters,
             admm_iter,
             residuals,
             abs_tol,
             rel_tol,
-        ):
+        )
+
+        dones = dones | new_dones
+
+        if torch.all(dones):
             log = AdmmLog(
                 iterations=admm_iter + 1,
             )
@@ -456,7 +469,7 @@ def admm_qp_solve(problem, parameters, lqr_mat, previous_solution=None):
             parameters.admm_update_rho
             and admm_iter % parameters.admm_rho_update_iter_freq == 0
         ):
-            rho_changed = update_rho(problem, parameters, solution, residuals)
+            rho_changed = update_rho(problem, parameters, solution, residuals, dones)
 
         # Tighten absolute tolerance
         if (
