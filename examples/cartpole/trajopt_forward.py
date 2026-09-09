@@ -12,6 +12,8 @@ from diffsqp.constraints import (
 )
 from diffsqp.types import SqpSolution
 
+from diffsqp.utils.load_save import *
+
 
 def main(args):
     device = args.device
@@ -42,9 +44,9 @@ def main(args):
             "admm_rel_tolerance_final": -1.0,
             "admm_tolerance_update_steps": 0,
             ## SQP ##
-            "sqp_max_iter": 100,
-            "merit_mu": 1e6,
-            "armijo_beta": 1e-4,
+            "sqp_max_iter": 25,
+            "merit_mu": 1e5,
+            "armijo_beta": 1e-3,
             "ls_max_iter": 10,
             "sqp_eps": 1e-4,
             "qp_solver": "lqr",
@@ -61,7 +63,7 @@ def main(args):
             "tf": 1.0,
             "x_init": [0.0, 0.0, 0.0, 0.0],
             "x_des": [0.0, 3.14159, 0.0, 0.0],
-            "noise_std": [0.0, 0.0, 0.0, 0.0],
+            "noise_std": [0.01, 0.01, 0.001, 0.001],
             # State-control bounds
             "x_lb": [-2.0, -1e6, -5.0, -20.0],
             "x_ub": [2.0, 1e6, 5.0, 20.0],
@@ -89,9 +91,9 @@ def main(args):
         }
     )
 
-    print(sqp_parameters)
+    # print(sqp_parameters)
     print(problem_parameters)
-    print(system_parameters)
+    # print(system_parameters)
 
     dynamics = CartPoleDynamics(system_parameters)
 
@@ -171,8 +173,9 @@ def main(args):
     print(log)
 
     if args.save:
-        print("Saving solution to ", args.save, "...")
+        print(f"Saving solution to {args.save}.pt...")
         save_solution(solution, args.save, x_des=problem_parameters.x_des)
+        log.save_to_json(args.save)
 
     # import matplotlib.pyplot as plt
     # from diffsqp.utils.plot import plot_trajectories
@@ -190,7 +193,7 @@ def main(args):
     #     problem_parameters.batch_size,
     # )
     # animator.animate(step_size=2)
-    # # animator.save(filename="admm.mp4", step_size=2)
+    # animator.save(filename="admm.mp4", step_size=2)
 
 
 if __name__ == "__main__":
