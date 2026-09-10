@@ -343,8 +343,8 @@ def initialize_tolerances(parameters):
     return abs_tol, rel_tol, abs_tol_step, rel_tol_step
 
 
-def get_unconstrained_solution(problem, lqr_mat):
-    unconstr_solution = lqr_solve(problem, lqr_mat)
+def get_unconstrained_solution(problem, lqr_mat, lqr_reg):
+    unconstr_solution = lqr_solve(problem, lqr_mat, lqr_reg)
     return unconstr_solution.dx, unconstr_solution.du
 
 
@@ -374,7 +374,7 @@ def reset_rho(problem, parameters):
     return rho, rho_inv, rho_common
 
 
-def new_solution(problem, parameters, lqr_mat, previous_solution):
+def new_solution(problem, parameters, lqr_mat, lqr_reg, previous_solution):
     batch_size = problem.batch_size
     horizon = problem.horizon
     n_x = problem.n_x
@@ -388,7 +388,7 @@ def new_solution(problem, parameters, lqr_mat, previous_solution):
 
     # Determine dx, du
     if parameters.admm_warm_start_unconstrained:
-        dx, du = get_unconstrained_solution(problem, lqr_mat)
+        dx, du = get_unconstrained_solution(problem, lqr_mat, lqr_reg)
     else:
         dx = torch.zeros((batch_size, horizon, n_x))
         du = torch.zeros((batch_size, horizon - 1, n_u))
@@ -413,7 +413,7 @@ def new_solution(problem, parameters, lqr_mat, previous_solution):
     return AdmmSolution(dx, du, mu, nu, z, ksi, rho, rho_inv, rho_common)
 
 
-def admm_qp_solve(problem, parameters, lqr_mat, previous_solution=None):
+def admm_qp_solve(problem, parameters, lqr_mat, lqr_reg, previous_solution=None):
     # Initialize things
     constr_mat = None
     rho_changed = True
@@ -426,7 +426,7 @@ def admm_qp_solve(problem, parameters, lqr_mat, previous_solution=None):
     dones = torch.zeros(problem.batch_size, dtype=torch.bool)
 
     # Prepare solution struct
-    solution = new_solution(problem, parameters, lqr_mat, previous_solution)
+    solution = new_solution(problem, parameters, lqr_mat, lqr_reg, previous_solution)
 
     # Initialize termination tolerances
     abs_tol, rel_tol, abs_tol_step, rel_tol_step = initialize_tolerances(parameters)
@@ -440,7 +440,7 @@ def admm_qp_solve(problem, parameters, lqr_mat, previous_solution=None):
         rho_changed = False  # ALWAYS set to false after constrained matrix calculation
 
         # Solve LQR
-        lqr_solution = lqr_solve(problem, constr_mat)
+        lqr_solution = lqr_solve(problem, constr_mat, lqr_reg)
 
         # Proximal step and residual update
         residuals = proximal_step_and_residuals(

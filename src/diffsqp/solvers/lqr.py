@@ -5,9 +5,10 @@ from diffsqp.utils.math import mm, mv, tran
 from diffsqp.types import QpParameters, AdmmSolution
 
 
-def lqr_solve(problem: Problem, mat):
+def lqr_solve(problem: Problem, mat, reg):
     K, k, P, p = lqr_backward_pass_(
         problem,
+        reg,
         mat.Q,
         mat.q,
         mat.R,
@@ -34,7 +35,7 @@ def lqr_solve(problem: Problem, mat):
     return result
 
 
-def lqr_backward_pass_(problem: Problem, Q, q, R, r, S, A, B, b, C, D, d):
+def lqr_backward_pass_(problem: Problem, reg, Q, q, R, r, S, A, B, b, C, D, d):
     batch_size = problem.batch_size
     horizon = problem.horizon
     n_x = problem.n_x
@@ -64,6 +65,7 @@ def lqr_backward_pass_(problem: Problem, Q, q, R, r, S, A, B, b, C, D, d):
             P[:, i],
             p[:, i],
         ) = lqr_step_backward_(
+            reg=reg,
             Q=Q_i,
             q=q_i,
             R=R_i,
@@ -133,7 +135,9 @@ def lqr_forward_pass_(problem: Problem, K, k, P, p, A, B, b):
     )
 
 
-def lqr_step_backward_(Q, q, R, r, S, P_next, p_next, A, B, b, C=None, D=None, d=None):
+def lqr_step_backward_(
+    reg, Q, q, R, r, S, P_next, p_next, A, B, b, C=None, D=None, d=None
+):
     # Create Q_, q_, R_, r_, S_
     # Pre-transpose matrices
     AT = tran(A)
@@ -150,8 +154,13 @@ def lqr_step_backward_(Q, q, R, r, S, P_next, p_next, A, B, b, C=None, D=None, d
     r_ = r + mv(BT, l)
     S_ = S + mm(BT, mm(P_next, A))
 
+    n_u = R_.shape[-1]
+    reg_I = reg.view(-1, 1, 1) * torch.eye(
+        n_u,
+    ).unsqueeze(0)
+    R_ = R_ + reg_I
+
     if C is not None:
-        n_u = R_.shape[-2]
         n_h = D.shape[-2]
         dim = n_u + n_h
 
@@ -159,6 +168,8 @@ def lqr_step_backward_(Q, q, R, r, S, P_next, p_next, A, B, b, C=None, D=None, d
         R_ext[..., :n_u, :n_u] = R_
         R_ext[..., n_u:, :n_u] = D
         R_ext[..., :n_u, n_u:] = D.transpose(-2, -1)
+        # TODO: Evaluate dual regularization in the extended R
+        # R_ext[..., n_u:, n_u:] = -1e-8 * torch.eye(n_h)
         R_ = R_ext
 
         r_ = torch.cat([r_, d], dim=-1)

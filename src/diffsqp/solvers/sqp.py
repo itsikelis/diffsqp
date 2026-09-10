@@ -38,6 +38,7 @@ class SqpParameters:
         self.admm_tolerance_update_steps = args["admm_tolerance_update_steps"]
 
         self.sqp_max_iter: int = args["sqp_max_iter"]
+        self.lqr_reg_init: int = args["lqr_reg_init"]
         self.armijo_beta: float = args["armijo_beta"]
         self.merit_mu: float = args["merit_mu"]
         self.ls_max_iter: int = args["ls_max_iter"]
@@ -122,7 +123,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
     batch_size = problem.batch_size
 
     terminated = torch.zeros((batch_size), dtype=torch.bool)
-    line_search_fails = 0
+    reg_incr = torch.zeros((batch_size,))
     current_guess = initial_guess
     # Cost, Dynamics Violation, Constraint Violation, Complementarity Slackness
     best_cost, best_dyn_inf, best_constr_inf, best_comp_inf = problem.evaluate_guess(
@@ -142,12 +143,14 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
     t_solve_start = time.time()
     for sqp_iter in range(parameters.sqp_max_iter):
         try:
+            # Base LQR damping scaled per batch element: 1e-5 * 10^(reg_incr)
+            lqr_reg = parameters.lqr_reg_init * torch.pow(10.0, reg_incr)
+
             ## Linearize problem ##
-            regularization_scale = 10.0**line_search_fails
-            mat = problem.linearize(current_guess, regularization_scale)
+            mat = problem.linearize(current_guess)
 
             admm_solution, admm_log = admm_qp_solve(
-                problem, parameters, mat, admm_solution
+                problem, parameters, mat, lqr_reg, admm_solution
             )
 
             #################
@@ -224,13 +227,15 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                 # Decrease alpha
                 alpha[~dones] *= 0.5
                 if torch.all(dones):
-                    # Reset line search fails
-                    line_search_fails = 0
                     break
 
-            if ls_iter == parameters.ls_max_iter - 1:
+            ls_failed = (~dones) & (~terminated)
+            if ls_failed.any():
                 print("Line search failed")
-                line_search_fails += 1
+                reg_incr[ls_failed] += 1.0
+                reg_incr[~ls_failed] = 0.0
+            else:
+                reg_incr.zero_()
 
             # Iteration log #
             sqp_log.admm_iter_hist.append(admm_log.iterations)

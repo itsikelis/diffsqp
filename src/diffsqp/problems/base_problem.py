@@ -282,7 +282,7 @@ class Problem(ABC):
 
         return cost, dyn_viols_inf, constr_viols_inf, comp_viols_inf
 
-    def linearize(self, solution_guess: SqpSolution, regularization_scale):
+    def linearize(self, solution_guess: SqpSolution):
         batch_size = self.batch_size
         horizon = self.horizon
         n_x, n_u = self.n_x, self.n_u
@@ -327,9 +327,9 @@ class Problem(ABC):
             B[:, k] = self.dynamics.fu(x_lin, u_lin, self.dt)
             b[:, k] = self.dynamics.f(x_lin, u_lin, self.dt) - x_next
 
-            Q[:, k] = self.lxx(k, x_lin, u_lin) + regularization_scale * torch.eye(n_x)
+            Q[:, k] = self.lxx(k, x_lin, u_lin)
             q[:, k] = self.lx(k, x_lin, u_lin)
-            R[:, k] = self.luu(k, x_lin, u_lin) + regularization_scale * torch.eye(n_u)
+            R[:, k] = self.luu(k, x_lin, u_lin)
             r[:, k] = self.lu(k, x_lin, u_lin)
             S[:, k] = self.lux(k, x_lin, u_lin)
 
