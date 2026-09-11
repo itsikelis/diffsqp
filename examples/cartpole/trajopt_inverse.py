@@ -46,7 +46,7 @@ def main(args):
             "admm_tolerance_update_steps": 0,
             ## SQP ##
             "sqp_max_iter": 50,
-            "lqr_reg_init": 1e-1,
+            "lqr_reg_init": 1e-5,
             "merit_mu": 1e7,
             "armijo_beta": 1e-3,
             "ls_max_iter": 10,

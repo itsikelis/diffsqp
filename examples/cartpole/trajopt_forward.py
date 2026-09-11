@@ -6,10 +6,7 @@ from diffsqp.costs import LqrCost
 from diffsqp.solvers import sqp_solve, SqpParameters
 from diffsqp.dynamics import CartPoleDynamics
 from diffsqp.dynamics import CartPoleParameters
-from diffsqp.constraints import (
-    StateBounds,
-    ControlBounds,
-)
+from diffsqp.constraints import StateBounds, ControlBounds
 from diffsqp.types import SqpSolution
 
 from diffsqp.utils.load_save import *

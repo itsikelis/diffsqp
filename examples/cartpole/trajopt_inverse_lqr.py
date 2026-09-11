@@ -75,7 +75,7 @@ def main(args):
             # Cost weights
             "q_w": [1e-4, 1e-4, 1e-4, 1e-4],
             "r_w": [1e-1, 1e-1],
-            "qf_w": [1e7, 1e7, 1e7, 1e7],
+            "qf_w": [1e5, 1e5, 1e5, 1e5],
         }
     )
 
