@@ -20,6 +20,8 @@ def main(args):
     urdf_path = URDF_DIR / "fp3.urdf"
     num_joints = 7
 
+    joint_limits_lower = [-2.9007, -1.8361, -2.9007, -3.0770, -2.8763, 0.4398, -3.0508]
+    joint_limits_upper = [2.9007, 1.8361, 2.9007, -0.1169, 2.8763, 4.6216, 3.0508]
     q_init = torch.tensor([0.0, 0.0, 0.0, -np.pi / 2, 0.0, np.pi / 2, 0.0])
     q = q_init.detach().clone()
 
@@ -58,8 +60,8 @@ def main(args):
     for i in range(num_joints):
         slider = server.gui.add_slider(
             f"Joint {i}",
-            min=-3.14,
-            max=3.14,
+            min=joint_limits_lower[i],
+            max=joint_limits_upper[i],
             step=0.01,
             initial_value=q_init[i].item(),
         )

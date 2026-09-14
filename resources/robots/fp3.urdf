@@ -9,7 +9,6 @@
   <!-- joint_limits: description of the joint limits that comes from a YAML file. Example definition: ${xacro.load_yaml('$(find franka_description)/robots/fr3/joint_limits.yaml')} -->
   <!-- kinematics: description of the kinematics that comes from a YAML file. Example definition: ${xacro.load_yaml('$(find franka_description)/robots/fr3/kinematics.yaml')} -->
   <!-- inertials: description of the inertials that comes from a YAML file. Example definition: ${xacro.load_yaml('$(find franka_description)/robots/fr3/inertials.yaml')} -->
-  <!-- dynamics: description of the dynamics that comes from a YAML file. Example definition: ${xacro.load_yaml('$(find franka_description)/robots/fr3/dynamics.yaml')} -->
   <link name="base">
       </link>
   <joint name="fp3_base_joint" type="fixed">
@@ -89,7 +88,6 @@
     <limit effort="87.0" lower="-2.9007" upper="2.9007" velocity="2.62"/>
     <safety_controller k_position="100.0" k_velocity="40.0" soft_lower_limit="-2.9007" soft_upper_limit="2.9007"/>
     <position_based_velocity_limits deceleration_limit="6.0" velocity_offset="0.652"/>
-    <dynamics D="1" K="7000" damping="0.003" friction="0.2" gear_ratio="120.0" motor_inertia="4.206399e-05" mu_coulomb="0" mu_viscous="16"/>
   </joint>
   <!-- sub-link defining detailed meshes for collision with environment -->
   <link name="fp3_link2">
@@ -131,7 +129,6 @@
     <limit effort="87.0" lower="-1.8361" upper="1.8361" velocity="2.62"/>
     <safety_controller k_position="100.0" k_velocity="40.0" soft_lower_limit="-1.8361" soft_upper_limit="1.8361"/>
     <position_based_velocity_limits deceleration_limit="2.585" velocity_offset="0.25"/>
-    <dynamics D="1" K="7000" damping="0.003" friction="0.2" gear_ratio="120.0" motor_inertia="4.206399e-05" mu_coulomb="0" mu_viscous="16"/>
   </joint>
   <!-- sub-link defining detailed meshes for collision with environment -->
   <link name="fp3_link3">
@@ -173,7 +170,6 @@
     <limit effort="87.0" lower="-2.9007" upper="2.9007" velocity="2.62"/>
     <safety_controller k_position="100.0" k_velocity="40.0" soft_lower_limit="-2.9007" soft_upper_limit="2.9007"/>
     <position_based_velocity_limits deceleration_limit="3.5" velocity_offset="0.2005"/>
-    <dynamics D="1" K="7000" damping="0.003" friction="0.2" gear_ratio="120.0" motor_inertia="3.211626e-05" mu_coulomb="0" mu_viscous="16"/>
   </joint>
   <!-- sub-link defining detailed meshes for collision with environment -->
   <link name="fp3_link4">
@@ -215,7 +211,6 @@
     <limit effort="87.0" lower="-3.077" upper="-0.1169" velocity="2.62"/>
     <safety_controller k_position="100.0" k_velocity="40.0" soft_lower_limit="-3.077" soft_upper_limit="-0.1169"/>
     <position_based_velocity_limits deceleration_limit="4.0" velocity_offset="0.3542"/>
-    <dynamics D="1" K="7000" damping="0.003" friction="0.2" gear_ratio="120.0" motor_inertia="3.211626e-05" mu_coulomb="0" mu_viscous="16"/>
   </joint>
   <!-- sub-link defining detailed meshes for collision with environment -->
   <link name="fp3_link5">
@@ -257,7 +252,6 @@
     <limit effort="12.0" lower="-2.8763" upper="2.8763" velocity="5.26"/>
     <safety_controller k_position="100.0" k_velocity="40.0" soft_lower_limit="-2.8763" soft_upper_limit="2.8763"/>
     <position_based_velocity_limits deceleration_limit="17.0" velocity_offset="0.5738"/>
-    <dynamics D="1" K="7000" damping="0.003" friction="0.2" gear_ratio="80.0" motor_inertia="3.211626e-05" mu_coulomb="0" mu_viscous="16"/>
   </joint>
   <!-- sub-link defining detailed meshes for collision with environment -->
   <link name="fp3_link6">
@@ -285,7 +279,6 @@
     <limit effort="12.0" lower="0.4398" upper="4.6216" velocity="4.18"/>
     <safety_controller k_position="100.0" k_velocity="40.0" soft_lower_limit="0.4398" soft_upper_limit="4.6216"/>
     <position_based_velocity_limits deceleration_limit="5.5" velocity_offset="0.4885"/>
-    <dynamics D="1" K="7000" damping="0.003" friction="0.2" gear_ratio="80.0" motor_inertia="3.211626e-05" mu_coulomb="0" mu_viscous="16"/>
   </joint>
   <!-- sub-link defining detailed meshes for collision with environment -->
   <link name="fp3_link7">
@@ -313,7 +306,6 @@
     <limit effort="12.0" lower="-3.0508" upper="3.0508" velocity="5.26"/>
     <safety_controller k_position="100.0" k_velocity="40.0" soft_lower_limit="-3.0508" soft_upper_limit="3.0508"/>
     <position_based_velocity_limits deceleration_limit="17.0" velocity_offset="0.4592"/>
-    <dynamics D="1" K="7000" damping="0.003" friction="0.2" gear_ratio="80.0" motor_inertia="3.211626e-05" mu_coulomb="0" mu_viscous="16"/>
   </joint>
   <link name="fp3_link8"/>
   <joint name="fp3_joint8" type="fixed">

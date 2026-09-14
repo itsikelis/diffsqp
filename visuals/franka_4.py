@@ -30,7 +30,6 @@ def main(args):
     BASE_DIR = Path(__file__).resolve().parent.parent
     URDF_DIR = BASE_DIR / "resources" / "robots"
     urdf_path = URDF_DIR / "fp3.urdf"
-    num_joints = 7
 
     batch_size = args.batch_size
     spacing = args.spacing if args.spacing is not None else 1.0

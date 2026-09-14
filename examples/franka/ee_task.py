@@ -1,9 +1,6 @@
 import argparse
 import torch
 import bard
-from dataclasses import dataclass
-import matplotlib.pyplot as plt
-from pathlib import Path
 
 from diffsqp.problems import Problem, ProblemParameters
 from diffsqp.costs import LqrCost, Cost
@@ -12,9 +9,10 @@ from diffsqp.dynamics.base_dynamics import Dynamics
 from diffsqp.constraints import StateBounds, ControlBounds
 from diffsqp.types import SqpSolution
 
-from diffsqp.utils.plot import plot_trajectories
+from dataclasses import dataclass
+from pathlib import Path
+
 from diffsqp.utils.load_save import *
-import matplotlib.pyplot as plt
 
 ##########################
 # Custom Kinematics Task #
@@ -168,30 +166,38 @@ def main(args):
 
     sqp_parameters = SqpParameters(
         **{
+            ## ADMM ##
             "admm_max_iter": 50,
             "admm_alpha": 1.6,
             "admm_sigma": 1e-6,
+            # Rho related
             "admm_reset_rho": False,
-            "admm_update_rho": False,
+            "admm_update_rho": True,
             "admm_rho_init": 0.8,
             "admm_rho_min": 1e-6,
-            "admm_rho_max": 1e3,
-            "admm_adaptive_rho_tolerance": 10.0,
-            "admm_rho_update_iter_freq": 10,
+            "admm_rho_max": 10.0,
+            "admm_adaptive_rho_tolerance": 2.0,
+            "admm_rho_update_iter_freq": 25,
+            # Warm starting
             "admm_warm_start_unconstrained": False,
             "admm_reset_ksi": False,
-            "admm_abs_tolerance": 0.01,
+            # Tolerances
+            "admm_abs_tolerance": 0.1,
             "admm_abs_tolerance_final": -1.0,
-            "admm_rel_tolerance": 0.0001,
+            "admm_rel_tolerance": 0.01,
             "admm_rel_tolerance_final": -1.0,
             "admm_tolerance_update_steps": 0,
-            "sqp_max_iter": 100,
-            "merit_mu": 1e6,
-            "armijo_beta": 1e-4,
+            ## SQP ##
+            "sqp_max_iter": 5,
+            "lqr_reg_init": 1e0,
+            "merit_mu": 1e4,
+            "armijo_beta": 1e0,
             "ls_max_iter": 10,
-            "sqp_eps": 1e-4,
+            "sqp_cost_eps": 1e-1,
+            "sqp_viol_eps": 1e-2,
+            "check_complementarity": False,
             "qp_solver": "lqr",
-            "ls_function": "filter",
+            "ls_function": "merit",
         }
     )
 
@@ -200,64 +206,56 @@ def main(args):
             "inverse_dynamics": False,
             "n_h": 0,
             "batch_size": batch_size,
-            "tf": 1.0,
-            "dt": 0.01,
+            "dt": 0.005,
+            "tf": 0.3,
             "x_init": [0.0, 0.0, 0.0, -torch.pi / 2.0, 0.0, torch.pi / 2.0, 0.0],
             "x_des": [0.0, 0.0, 0.2, -torch.pi / 2.0, 0.0, torch.pi / 2.0, 0.0],
-            "noise_std": [0.1] * 7,
-            "x_lb": [-1e6] * 7,
-            "x_ub": [1e6] * 7,
-            "u_lb": [-1e6] * 7,
-            "u_ub": [1e6] * 7,
-            "q_w": [1e-5] * 7,
-            "r_w": [1e-1] * 7,
-            "qf_w": [1e-5] * 7,  # Use custom EE tracking cost instead of State Q
+            "noise_std": [0.05] * 7,
+            # "noise_std": [0.0] * 7,
+            "x_lb": [-2.9007, -1.8361, -2.9007, -3.0770, -2.8763, 0.4398, -3.0508],
+            "x_ub": [2.9007, 1.8361, 2.9007, -0.1169, 2.8763, 4.6216, 3.0508],
+            "u_lb": [-2.62, -2.62, -2.62, -2.62, -5.26, -4.18, -5.26],
+            "u_ub": [2.62, 2.62, 2.62, 2.62, 5.26, 4.18, 5.26],
+            # "u_lb": [-10.0] * 7,
+            # "u_ub": [10.0] * 7,
+            "q_w": [1e-3] * 7,
+            "r_w": [1e-1, 1e-1, 1e-1, 1e-1, 1e-1, 2e-1, 1e-1],
+            "qf_w": [1e1] * 7,  # Use custom EE tracking cost instead of State Q
         }
     )
 
     system_parameters = KinematicDynamicsParameters()
     dynamics = KinematicDynamics(system_parameters)
 
-    # --- 3. Build & Solve Problem ---
-
+    # Create Problem
     problem = Problem(problem_parameters, system_parameters)
     problem.dynamics = dynamics
 
     # 1 Desired End-Effector position and penalty weights
 
+    # x_des = problem_parameters.x_des.detach().clone()
+
+    # x_des = torch.tensor([0.0000, 0.0000, 0.0000, -1.5708, 0.0000, 1.5708, 0.0000])
+    # T_ref = torch.tensor(
+    #     [
+    #         [1.0, 0.0, 0.0, 0.5545],
+    #         [0.0, 1.0, 0.0, 0.0000],
+    #         [0.0, 0.0, 1.0, 0.7315],
+    #         [0.0, 0.0, 0.0, 1.0000],
+    #     ]
+    # )
+
+    x_des = torch.tensor([0.2800, 0.3000, 0.0000, -1.7900, 0.0000, 2.1200, 0.0000])
     T_ref = torch.tensor(
         [
-            [0.4947, -0.7662, -0.4101, 0.2967],
-            [-0.3802, 0.2336, -0.8949, -0.6123],
-            [0.7815, 0.5987, -0.1757, 0.6924],
-            [0.0000, 0.0000, 0.0000, 1.0000],
+            [9.6062e-01, 2.7636e-01, 2.8827e-02, 6.0978e-01],
+            [2.7623e-01, -9.6106e-01, 8.2894e-03, 1.7534e-01],
+            [2.9995e-02, -8.4831e-16, -9.9955e-01, 4.9424e-01],
+            [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
         ]
     )
 
-    x_ref = torch.tensor([-0.8000, 0.6400, -0.7400, -0.9700, -0.7400, 2.4800, 0.5300])
-
-    # q:  [-0.8000,  0.6400, -0.7400, -0.9700, -0.7400,  2.4800,  0.5300]
-    # tf: [[ 0.4947, -0.7662, -0.4101,  0.2967],
-    #      [-0.3802,  0.2336, -0.8949, -0.6123],
-    #      [ 0.7815,  0.5987, -0.1757,  0.6924],
-    #      [ 0.0000,  0.0000,  0.0000,  1.0000]]
-    # q: [0.0000,  0.5900,  0.6400, -2.0600,  0.9900,  0.8700,  0.0000]
-    # tf: [[-0.3022, -0.4001, -0.8652,  0.3961],
-    #      [ 0.7360, -0.6747,  0.0549,  0.3396],
-    #      [-0.6057, -0.6202,  0.4984,  0.2475],
-    #      [ 0.0000,  0.0000,  0.0000,  1.0000]]
-    # q: [0.2400, 1.2800, 0.4700, 0.5300, 0.2400, 1.6200, 1.1000]
-    # tf: [[ 0.7385, -0.4170,  0.5299,  0.6000],
-    #      [-0.6490, -0.2266,  0.7263,  0.0382],
-    #      [-0.1828, -0.8802, -0.4379,  0.7245],
-    #      [ 0.0000,  0.0000,  0.0000,  1.0000]]
-    # q: [0.2400, -0.2800, -1.4300,  1.1000, -1.6600,  1.6200, -0.3900]
-    # tf: [[-0.4319, -0.0130, -0.9018, -0.2563],
-    #      [ 0.5582,  0.7815, -0.2786,  0.3205],
-    #      [ 0.7085, -0.6237, -0.3302,  0.7587],
-    #      [ 0.0000,  0.0000,  0.0000,  1.0000]]
-
-    Q_ee_diag = torch.tensor([1e3, 1e3, 1e3, 1e2, 1e2, 1e2])
+    Q_ee_diag = torch.tensor([5e1, 5e1, 5e1, 5e1, 5e1, 5e1])
     eef_id = model.get_frame_id("fp3_link7")
     ee_cost = EndEffectorTrackingCost(model, data, eef_id, T_ref, Q_ee_diag)
 
@@ -268,28 +266,29 @@ def main(args):
         problem.batch_size, 1, 1
     )
     reg_cost = LqrCost(Q=Q, R=R, x_des=problem_parameters.x_init.detach().clone())
-    final_reg_cost = LqrCost(Q=Qf, x_des=problem_parameters.x_des.detach().clone())
+    final_reg_cost = LqrCost(Q=Qf, x_des=x_des)
 
     if args.load:
         x, u = load_solution(args.load, device=device)
     else:
-        x = problem_parameters.x_init.clone().expand(
-            batch_size, problem.horizon, problem.n_x
-        )
+        x = torch.zeros((problem.batch_size, problem.horizon, problem.n_x))
+        for k in range(problem.horizon):
+            x[:, k] = problem_parameters.x_init.clone()
+
         u = torch.zeros((problem.batch_size, problem.horizon - 1, problem.n_u))
 
     initial_guess = SqpSolution(
-        x=torch.zeros((problem.batch_size, problem.horizon, problem.n_x)),
-        u=torch.zeros((problem.batch_size, problem.horizon - 1, problem.n_u)),
+        x=x,
+        u=u,
         mu=torch.zeros((problem.batch_size, problem.horizon, problem.n_x)),
         nu=torch.zeros((problem.batch_size, problem.horizon - 1, problem.n_h)),
         ksi=[None] * problem.horizon,
     )
 
-    # Set Initial state
+    # Randomise Initial state
     initial_guess.x[:, 0] = problem_parameters.x_init.clone()
     noise_std = problem_parameters.noise_std
-    noise_dim = problem_parameters.noise_std.shape[0]
+    noise_dim = len(noise_std)
     initial_guess.x[:, 0] += torch.tensor(noise_std) * torch.randn(
         (batch_size, noise_dim)
     )
@@ -297,8 +296,8 @@ def main(args):
     for k in range(problem.horizon - 1):
         problem.costs.append(
             [
-                # ee_cost,
                 reg_cost,
+                ee_cost,
             ]
         )
         problem.constraints[k] = [
@@ -315,8 +314,6 @@ def main(args):
                 problem_parameters.u_ub,
             ),
         ]
-
-    # initial_guess.x[:, -1] = problem_parameters.x_init.clone()
     problem.constraints[-1] = [
         StateBounds(
             problem.n_x, problem.n_u, problem_parameters.x_lb, problem_parameters.x_ub
@@ -324,8 +321,8 @@ def main(args):
     ]
     problem.costs.append(
         [
-            ee_cost,
             # final_reg_cost,
+            ee_cost,
         ]
     )
 
@@ -333,15 +330,17 @@ def main(args):
     solution, log = sqp_solve(problem, sqp_parameters, initial_guess)
 
     print(log)
-    print(f"Time elapsed: {log.solve_wall_time_s} s.")
 
+    import matplotlib.pyplot as plt
+    from diffsqp.utils.plot import plot_trajectories
+
+    print(solution.x[0, -1].tolist())
     plot_trajectories(solution.x, solution.u)
+    plt.show()
 
     if args.save:
-        print("Saving")
-        save_solution(solution, args.save, x_des=x_ref)
-
-    plt.show()
+        print("Saving solution to ", args.save, "...")
+        save_solution(solution, args.save, x_des=x_des)
 
 
 if __name__ == "__main__":
