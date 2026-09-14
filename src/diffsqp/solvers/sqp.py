@@ -42,6 +42,7 @@ class SqpParameters:
         self.armijo_beta: float = args["armijo_beta"]
         self.merit_mu: float = args["merit_mu"]
         self.ls_max_iter: int = args["ls_max_iter"]
+        self.check_complementarity: float = args["check_complementarity"]
         self.sqp_cost_eps: float = args["sqp_cost_eps"]
         self.sqp_viol_eps: float = args["sqp_viol_eps"]
         self.qp_solver: str = args["qp_solver"]
@@ -265,6 +266,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
             )
             dx_inf = torch.norm(dot_delta_x, p=float("inf"), dim=[1])
             du_inf = torch.norm(dot_delta_u, p=float("inf"), dim=[1])
+            # print(f"Dx_inf: {dx_inf} Du_inf: {du_inf}")
             stationarity = torch.logical_and(
                 dx_inf < parameters.sqp_cost_eps,
                 du_inf < parameters.sqp_cost_eps,
@@ -273,10 +275,10 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
             convergence_error = torch.maximum(best_dyn_inf, best_constr_inf)
             constraint_satisfaction = convergence_error < parameters.sqp_viol_eps
 
-            complementarity = best_comp_inf < parameters.sqp_viol_eps
-
-            terminated = stationarity & constraint_satisfaction & complementarity
-            # terminated = constraint_satisfaction & complementarity
+            terminated = stationarity & constraint_satisfaction
+            if parameters.check_complementarity:
+                complementarity = best_comp_inf < parameters.sqp_viol_eps
+                terminated &= complementarity
 
             if terminated.all():
                 break

@@ -47,6 +47,7 @@ def main(args):
             "ls_max_iter": 10,
             "sqp_cost_eps": 1e-2,
             "sqp_viol_eps": 1e-3,
+            "check_complementarity": True,
             "qp_solver": "lqr",
             "ls_function": "merit",
         }

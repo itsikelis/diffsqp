@@ -50,6 +50,7 @@ sqp_parameters_dict = {
     "armijo_beta": 1e-4,
     "ls_max_iter": 10,
     "sqp_eps": 1e-4,
+    "check_complementarity": False,
     "qp_solver": "lqr",
     "ls_function": "merit",
 }
