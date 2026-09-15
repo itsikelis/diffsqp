@@ -40,7 +40,7 @@ def main(args):
             "admm_rel_tolerance_final": -1.0,
             "admm_tolerance_update_steps": 0,
             ## SQP ##
-            "sqp_max_iter": 100,
+            "sqp_max_iter": 10,
             "lqr_reg_init": 1e-5,
             "merit_mu": 1e6,
             "armijo_beta": 1e-4,
@@ -63,9 +63,9 @@ def main(args):
             "x_init": [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             "x_des": [1.0, 0.0, 0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             "noise_std": [
-                0.1,
-                0.1,
-                0.1,
+                0.05,
+                0.05,
+                0.05,
                 0.01,
                 0.01,
                 0.01,
@@ -254,14 +254,14 @@ def main(args):
     # plt.show()
 
     # Animate:
-    from diffsqp.utils.animate import QuadrotorAnimator
-
-    animator = QuadrotorAnimator(
-        solution.x,
-        problem_parameters.dt,
-        problem_parameters.batch_size,
-    )
-    animator.animate(step_size=2)
+    # from diffsqp.utils.animate import QuadrotorAnimator
+    #
+    # animator = QuadrotorAnimator(
+    #     solution.x,
+    #     problem_parameters.dt,
+    #     problem_parameters.batch_size,
+    # )
+    # animator.animate(step_size=2)
     # animator.save(filename="quadrotor.mp4", step_size=2)
 
 
