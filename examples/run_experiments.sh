@@ -3,9 +3,9 @@
 # ==========================================
 # Experiment Configuration
 # ==========================================
-N=1                 # Number of times to run each file
-BATCH_SIZE=4        # Target batch size (nB)
-DEVICE="cpu"        # Target device (cpu or cuda)
+N=5                  # Number of times to run each file
+BATCH_SIZE=32768     # Target batch size (nB)
+DEVICE="cuda"        # Target device (cpu or cuda)
 
 # The list of target scripts
 SCRIPTS=(

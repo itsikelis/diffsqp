@@ -4,7 +4,7 @@
 # Experiment Configuration
 # ==========================================
 N=5                                   # Number of times to run each batch size
-BATCH_SIZES=(1 4 16 64 256 1024)      # Array of batch sizes to test
+BATCH_SIZES=(1 32 1024 32768)         # Array of batch sizes to test
 DEVICE="cuda"                         # Target device (cpu or cuda)
 GPU_ID=0                              # GPU to monitor
 SCRIPT="quadrotor/ours.py" # The target script
