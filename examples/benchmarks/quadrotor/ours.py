@@ -27,7 +27,7 @@ def main(args):
             "admm_update_rho": True,
             "admm_rho_init": 0.1,
             "admm_rho_min": 1e-6,
-            "admm_rho_max": 1e8,
+            "admm_rho_max": 10.0,
             "admm_adaptive_rho_tolerance": 5.0,
             "admm_rho_update_iter_freq": 25,
             # Warm starting
