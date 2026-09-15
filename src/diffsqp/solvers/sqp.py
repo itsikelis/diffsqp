@@ -158,6 +158,20 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
             #################
             ## Line search ##
             #################
+            alpha = torch.ones((batch_size))
+
+            # If not line search, accept change and break
+            if parameters.ls_max_iter == 0:
+                current_guess = SqpSolution(
+                    x=current_guess.x
+                    + torch.einsum("b,bhj->bhj", alpha, admm_solution.dx),
+                    u=current_guess.u
+                    + torch.einsum("b,bhj->bhj", alpha, admm_solution.du),
+                    mu=admm_solution.mu,
+                    nu=admm_solution.nu,
+                    ksi=admm_solution.ksi,
+                )
+                break
 
             # Directional Derivative for Armijo check
             if parameters.ls_function == "merit":
@@ -165,7 +179,6 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                     current_guess, admm_solution
                 )
 
-            alpha = torch.ones((batch_size))
             dones = terminated.detach().clone()
             for ls_iter in range(parameters.ls_max_iter):
                 new_guess = SqpSolution(
