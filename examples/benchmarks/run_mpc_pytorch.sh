@@ -7,7 +7,7 @@ N=5                                   # Number of times to run each batch size
 BATCH_SIZES=(1 32 1024 32768)         # Array of batch sizes to test
 DEVICE="cuda"                         # Target device (cpu or cuda)
 GPU_ID=0                              # GPU to monitor
-SCRIPT="quadrotor/mpc_pytorch.py" # The target script
+SCRIPT="mpc_pytorch.py" # The target script
 
 # ==========================================
 # Execution Loop
