@@ -24,7 +24,7 @@ def main(args):
     sqp_parameters = SqpParameters(
         **{
             ## ADMM ##
-            "admm_max_iter": 150,
+            "admm_max_iter": 30,
             "admm_alpha": 1.6,
             "admm_sigma": 1e-6,
             # Rho related
@@ -45,14 +45,14 @@ def main(args):
             "admm_rel_tolerance_final": -1.0,
             "admm_tolerance_update_steps": 0,
             ## SQP ##
-            "sqp_max_iter": 50,
+            "sqp_max_iter": 60,
             "lqr_reg_init": 1e-5,
             "merit_mu": 1e7,
             "armijo_beta": 1e-3,
             "ls_max_iter": 10,
-            "sqp_cost_eps": 1e-10,
-            "sqp_viol_eps": 1e-10,
-            "check_complementarity": True,
+            "sqp_cost_eps": 1e-1,
+            "sqp_viol_eps": 1e-4,
+            "check_complementarity": False,
             "qp_solver": "lqr",
             "ls_function": "filter",
         }
@@ -67,15 +67,15 @@ def main(args):
             "tf": 1.0,
             "x_init": [0.0, 0.0, 0.0, 0.0],
             "x_des": [0.0, 3.14159, 0.0, 0.0],
-            "noise_std": [0.01, 0.01, 0.001, 0.001],
+            "noise_std": [0.1, 0.01, 0.001, 0.001],
             # State-control bounds
             "x_lb": [-2.5, -1e6, -5.0, -20.0],
             "x_ub": [2.5, 1e6, 5.0, 20.0],
             "u_lb": [-300.0, -300.0],
             "u_ub": [300.0, 300.0],
             # Cost weights
-            "q_w": [1e-4, 1e-4, 1e-4, 1e-4],
-            "r_w": [1e-1, 1e-1],
+            "q_w": [1e-6, 1e-6, 1e-6, 1e-6],
+            "r_w": [1e-2, 1e-2],
             "qf_w": [1e5, 1e5, 1e5, 1e5],
         }
     )
