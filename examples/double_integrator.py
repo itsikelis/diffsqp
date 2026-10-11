@@ -60,13 +60,14 @@ def main(args):
             "admm_rel_tolerance_final": -1.0,
             "admm_tolerance_update_steps": 0,
             ## SQP ##
-            "sqp_max_iter": 3,
+            "sqp_max_iter": 5,
             "lqr_reg_init": 1e-5,
             "merit_mu": 1e5,
             "armijo_beta": 1e-3,
             "ls_max_iter": 10,
             "sqp_cost_eps": 1e-1,
             "sqp_viol_eps": 1e-4,
+            "check_complementarity": False,
             "qp_solver": "lqr",
             "ls_function": "filter",
         }
@@ -78,20 +79,20 @@ def main(args):
             "n_h": 0,
             "batch_size": batch_size,
             "dt": 0.01,
-            "tf": 1.0,
+            "tf": 0.5,
             "n_h": 0,
             "x_init": [0.0, 0.0, 0.0, 0.0],
             "x_des": [1.0, 0.5, 0.0, 0.0],
             "noise_std": [0.01, 0.01, 0.001, 0.001],
             # State-control bounds
-            "x_lb": [-1.0, -1e6, -1e6, -1e6],
-            "x_ub": [1.0, 1e6, 1e6, 1e6],
-            "u_lb": [-3.0, -3.0],
-            "u_ub": [3.0, 3.0],
+            "x_lb": [-1.2, -1e6, -1e6, -1e6],
+            "x_ub": [1.2, 1e6, 1e6, 1e6],
+            "u_lb": [-10.0, -10.0],
+            "u_ub": [10.0, 10.0],
             # Cost weights
             "q_w": [1e-12, 1e-12, 1e-12, 1e-12],
             "r_w": [1e-2, 1e-2],
-            "qf_w": [1e1, 1e1, 1e1, 1e1],
+            "qf_w": [1e3, 1e3, 1e3, 1e3],
         }
     )
 

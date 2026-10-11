@@ -10,10 +10,17 @@ dependencies = [
     "matplotlib>=3.10.8",
     "opt-einsum>=3.4.0",
     "pyyaml>=6.0.3",
-    "torch>=2.10.0",
-    "torchvision>=0.25.0",
+    "torch>=2.14.1",
+    "torchvision>=0.29.1",
     "viser>=1.0.21",
 ]
 
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true
+
 [tool.uv.sources]
 bard = { git = "https://github.com/YueWang996/bard-pytorch-dynamics" }
+torch = { index = "pytorch-cu132" }
+torchvision = { index = "pytorch-cu132" }
