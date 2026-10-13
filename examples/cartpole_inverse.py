@@ -33,7 +33,7 @@ def main(args):
             "admm_sigma": 1e-6,
             # Rho related
             "admm_reset_rho": False,
-            "admm_update_rho": False,
+            "admm_update_rho": True,
             "admm_rho_init": 0.1,
             "admm_rho_min": 1e-6,
             "admm_rho_max": 1e8,
@@ -154,6 +154,24 @@ def main(args):
 
     if args.save:
         save_solution(solution, args.save, x_des=problem_parameters.x_des)
+
+    # import matplotlib.pyplot as plt
+    # from diffsqp.utils.plot import plot_trajectories
+    #
+    # plot_trajectories(solution.x, solution.u)
+    # plt.show()
+
+    # Animate:
+    from diffsqp.utils.animate import CartPoleAnimator
+
+    animator = CartPoleAnimator(
+        solution.x,
+        system_parameters.lp,
+        problem_parameters.dt,
+        problem_parameters.batch_size,
+    )
+    animator.animate(step_size=2)
+    # animator.save(filename="admm.mp4", step_size=2)
 
 
 if __name__ == "__main__":
