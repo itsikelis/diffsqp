@@ -10,6 +10,10 @@ from diffsqp.types import SqpSolution, AdmmSolution, QpParameters
 
 from diffsqp.utils.math import mv
 
+# Bound used for padded constraint rows (stages with fewer constraints than
+# the largest stage). Finite, so 0 * bound stays 0 in complementarity checks.
+PAD_BOUND = 1e20
+
 
 class ProblemParameters:
     def __init__(self, **args):
@@ -80,7 +84,16 @@ class Problem(ABC):
         self.Lx = torch.zeros((self.batch_size, self.horizon, self.n_x))
         self.Lu = torch.zeros((self.batch_size, self.horizon - 1, self.n_u))
 
+        # Padded stage bounds, see `padded_bounds`
+        self._padded_bounds = None
+
     # --- Cost Aggregation Methods ---
+
+    def _sum_costs(self, method: str, stage_idx: int, x, u):
+        costs = self.costs[stage_idx]
+        if len(costs) == 1:
+            return getattr(costs[0], method)(x, u)
+        return torch.sum(torch.stack([getattr(c, method)(x, u) for c in costs]), dim=0)
 
     def l(
         self, stage_idx: int, x: torch.Tensor, u: Optional[torch.Tensor] = None
@@ -96,42 +109,35 @@ class Problem(ABC):
         Returns:
             Total scalar cost per batch [nB].
         """
-        all_costs = torch.stack([c.l(x, u) for c in self.costs[stage_idx]])
-        return torch.sum(all_costs, dim=0)
+        return self._sum_costs("l", stage_idx, x, u)
 
     def lx(
         self, stage_idx: int, x: torch.Tensor, u: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """Total state gradient of the cost at stage_idx."""
-        all_grads = torch.stack([c.lx(x, u) for c in self.costs[stage_idx]])
-        return torch.sum(all_grads, dim=0)
+        return self._sum_costs("lx", stage_idx, x, u)
 
     def lu(self, stage_idx: int, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """Total control gradient of the cost at stage_idx."""
-        all_grads = torch.stack([c.lu(x, u) for c in self.costs[stage_idx]])
-        return torch.sum(all_grads, dim=0)
+        return self._sum_costs("lu", stage_idx, x, u)
 
     def lxx(
         self, stage_idx: int, x: torch.Tensor, u: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """Total state Hessian (d^2L/dx^2) at stage_idx."""
-        all_hessians = torch.stack([c.lxx(x, u) for c in self.costs[stage_idx]])
-        return torch.sum(all_hessians, dim=0)
+        return self._sum_costs("lxx", stage_idx, x, u)
 
     def luu(self, stage_idx: int, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """Total control Hessian (d^2L/du^2) at stage_idx."""
-        all_hessians = torch.stack([c.luu(x, u) for c in self.costs[stage_idx]])
-        return torch.sum(all_hessians, dim=0)
+        return self._sum_costs("luu", stage_idx, x, u)
 
     def lux(self, stage_idx: int, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """Total cross-derivative (d^2L/dudx) at stage_idx."""
-        all_hessians = torch.stack([c.lux(x, u) for c in self.costs[stage_idx]])
-        return torch.sum(all_hessians, dim=0)
+        return self._sum_costs("lux", stage_idx, x, u)
 
     def lxu(self, stage_idx: int, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """Total cross-derivative (d^2L/dxdu) at stage_idx."""
-        all_hessians = torch.stack([c.lxu(x, u) for c in self.costs[stage_idx]])
-        return torch.sum(all_hessians, dim=0)
+        return self._sum_costs("lxu", stage_idx, x, u)
 
     # --- Constraint Aggregation Methods ---
 
@@ -168,6 +174,45 @@ class Problem(ABC):
         ub = torch.cat([c.ub for c in self.constraints[stage_idx]])
         return lb, ub
 
+    def padded_bounds(self, refresh: bool = False):
+        """Stage bounds stacked over the horizon: lb, ub of shape (H, G).
+
+        G is the largest number of constraints of any stage. Missing rows are
+        unbounded (+-PAD_BOUND). The result is cached; `sqp_solve` refreshes it
+        at the start of every solve, in case the constraints changed.
+        """
+        if self._padded_bounds is not None and not refresh:
+            return self._padded_bounds
+
+        n_gs = [self.n_g(k) for k in range(self.horizon)]
+        G = max(n_gs)
+        lb = torch.full((self.horizon, G), -PAD_BOUND)
+        ub = torch.full((self.horizon, G), PAD_BOUND)
+        for k, n_g in enumerate(n_gs):
+            if n_g > 0:
+                lb_k, ub_k = self.g_bounds(k)
+                lb, ub = lb.to(lb_k.device), ub.to(ub_k.device)
+                lb[k, :n_g], ub[k, :n_g] = lb_k, ub_k
+
+        self._padded_bounds = (lb, ub)
+        return self._padded_bounds
+
+    def padded_g(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        """Stage constraint values stacked over the horizon: (B, H, G)."""
+        lb, _ = self.padded_bounds()
+        g = torch.zeros(
+            (x.shape[0], self.horizon, lb.shape[-1]), dtype=x.dtype, device=x.device
+        )
+        for k in range(self.horizon):
+            n_g = self.n_g(k)
+            if n_g == 0:
+                continue
+            if k < self.horizon - 1:
+                g[:, k, :n_g] = self.g(k, x[:, k], u[:, k])
+            else:
+                g[:, k, :n_g] = self.g(k, x[:, k])
+        return g
+
     def gx(
         self, stage_idx: int, x: torch.Tensor, u: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
@@ -181,103 +226,84 @@ class Problem(ABC):
         return grad
 
     def evaluate_directional_derivatives(
-        self, guess: SqpSolution, correction: AdmmSolution
+        self, guess: SqpSolution, correction: AdmmSolution, mat: QpParameters = None
     ):
-        l_dir_deriv = torch.zeros(self.batch_size)
-        # g_dir_deriv = torch.zeros(self.batch_size)
-        for k in range(self.horizon - 1):
-            x_k = guess.x[:, k]
-            u_k = guess.u[:, k]
-            dx_k = correction.dx[:, k]
-            du_k = correction.du[:, k]
+        """Directional derivative of the total cost along (dx, du).
 
-            lx_k = self.lx(k, x_k, u_k)
-            lu_k = self.lu(k, x_k, u_k)
-            # gu_k = self.gu(k, x_k, u_k)
-            # gx_k = self.gx(k, x_k, u_k)
+        If `mat` is the linearization at `guess`, its gradients (q, r) are
+        reused instead of evaluating the cost gradients again.
+        """
+        if mat is not None:
+            q, r = mat.q, mat.r
+        else:
+            q = torch.stack(
+                [self.lx(k, guess.x[:, k], guess.u[:, k]) for k in range(self.horizon - 1)]
+                + [self.lx(-1, guess.x[:, -1])],
+                dim=1,
+            )
+            r = torch.stack(
+                [self.lu(k, guess.x[:, k], guess.u[:, k]) for k in range(self.horizon - 1)],
+                dim=1,
+            )
+        return torch.sum(q * correction.dx, dim=(1, 2)) + torch.sum(
+            r * correction.du, dim=(1, 2)
+        )
 
-            l_dir_deriv += torch.einsum("bj,bj->b", lx_k, dx_k)
-            l_dir_deriv += torch.einsum("bj,bj->b", lu_k, du_k)
-
-            # g_dir_deriv += torch.einsum("bhj,bhj->b", gx_k, dx_k)
-            # g_dir_deriv += torch.einsum("bhj,bhj->b", gu_k, du_k)
-
-        x_F = guess.x[:, -1]
-        dx_F = correction.dx[:, -1]
-        lx_F = self.lx(-1, x_F)
-        # gx_f = self.gx(-1, x_F)
-
-        l_dir_deriv += torch.einsum("bj,bj->b", lx_F, dx_F)
-        # g_dir_deriv += torch.einsum("bj,bj->b", gx_F, gx_F)
-
-        return l_dir_deriv  # , g_dir_deriv
+    def equality_residuals(self, x: torch.Tensor, u: torch.Tensor):
+        """Dynamics gaps f(x_k, u_k) - x_{k+1}, shape (B, H-1, n_x), and
+        underactuation residuals h(x_k, u_k), shape (B, H-1, n_h) or None."""
+        x_flat = x[:, :-1].reshape(-1, self.n_x)
+        u_flat = u.reshape(-1, self.n_u)
+        gaps = self.dynamics.f(x_flat, u_flat, self.dt).reshape(x[:, 1:].shape) - x[:, 1:]
+        h = None
+        if self.underactuation is not None:
+            h = self.underactuation.h(x_flat, u_flat).reshape(*u.shape[:2], self.n_h)
+        return gaps, h
 
     def evaluate_guess(self, solution_guess: SqpSolution):
         """Return total trajectory cost and constraint violation"""
-        device = solution_guess.x.device
         batch_size = self.batch_size
         horizon = self.horizon
         dt = self.dt
+        n_x, n_u = self.n_x, self.n_u
+        x, u = solution_guess.x, solution_guess.u
 
-        cost = torch.zeros((batch_size))
-        dynamics_viol = torch.zeros((batch_size))
-        cost = torch.zeros((batch_size), device=device)
-        dynamics_viol = torch.zeros((batch_size), device=device)
-
-        # Calculate total trajectory cost and constraint_violation
-        constr_viols_inf = torch.zeros((batch_size), device=solution_guess.x.device)
-        comp_viols_inf = torch.zeros((batch_size), device=solution_guess.x.device)
+        # Total trajectory cost
+        cost = torch.zeros((batch_size), device=x.device)
         for k in range(horizon - 1):
-            cost += self.l(k, solution_guess.x[:, k], solution_guess.u[:, k])
-            g_val = self.g(k, solution_guess.x[:, k], solution_guess.u[:, k])
-            lb, ub = self.g_bounds(k)
-            if g_val is not None:
-                stage_error = torch.cat([relu(lb - g_val), relu(g_val - ub)], dim=1)
-                constr_viols_inf = torch.maximum(
-                    constr_viols_inf, stage_error.max(dim=1).values
-                )
-                # Complementarity Slackness Violation
-                if solution_guess.ksi[k] is not None:
-                    ksi_k = solution_guess.ksi[k]
-                    # Complementarity: dual * slack = 0
-                    # For upper bound: max(ksi, 0) * (ub - g)
-                    # For lower bound: min(ksi, 0) * (g - lb)
-                    comp_ub = torch.abs(relu(ksi_k) * (ub - g_val))
-                    comp_lb = torch.abs(relu(-ksi_k) * (g_val - lb))
-                    comp_error = torch.cat([comp_ub, comp_lb], dim=1)
-                    comp_viols_inf = torch.maximum(
-                        comp_viols_inf, comp_error.max(dim=1).values
-                    )
+            cost = cost + self.l(k, x[:, k], u[:, k])
+        cost = cost + self.l(-1, x[:, -1])
 
-        # Final stage
-        cost += self.l(-1, solution_guess.x[:, -1])
-        g_val = self.g(-1, solution_guess.x[:, -1])
-        lb, ub = self.g_bounds(-1)
-        if g_val is not None:
-            stage_error = torch.cat([relu(g_val - ub), relu(lb - g_val)], dim=1)
-            constr_viols_inf = torch.maximum(
-                constr_viols_inf, stage_error.max(dim=1).values
-            )
-            if solution_guess.ksi[-1] is not None:
-                ksi_f = solution_guess.ksi[-1]
-                comp_ub = torch.abs(relu(ksi_f) * (ub - g_val))
-                comp_lb = torch.abs(relu(-ksi_f) * (g_val - lb))
-                comp_error = torch.cat([comp_ub, comp_lb], dim=1)
-                comp_viols_inf = torch.maximum(
-                    comp_viols_inf, comp_error.max(dim=1).values
-                )
+        # Stage constraint violation and complementarity, all stages at once
+        constr_viols_inf = torch.zeros((batch_size), device=x.device)
+        comp_viols_inf = torch.zeros((batch_size), device=x.device)
+        lb, ub = self.padded_bounds()
+        if lb.shape[-1] > 0:
+            g_val = self.padded_g(x, u)
+            stage_error = torch.maximum(relu(lb - g_val), relu(g_val - ub))
+            constr_viols_inf = stage_error.amax(dim=(1, 2))
+
+            ksi = solution_guess.ksi
+            if torch.is_tensor(ksi):
+                # Complementarity: dual * slack = 0
+                # For upper bound: max(ksi, 0) * (ub - g)
+                # For lower bound: min(ksi, 0) * (g - lb)
+                comp_ub = torch.abs(relu(ksi) * (ub - g_val))
+                comp_lb = torch.abs(relu(-ksi) * (g_val - lb))
+                comp_viols_inf = torch.maximum(comp_ub, comp_lb).amax(dim=(1, 2))
 
         # Dynamics violation
-        x_next = solution_guess.x[:, 1:]
-        x_curr = solution_guess.x[:, :-1]
-        u_curr = solution_guess.u[:]
-        dyn_viols = x_next - self.dynamics.f(x_curr, u_curr, dt)
-        dyn_viols_inf = torch.norm(dyn_viols, p=float("inf"), dim=[1, 2])
+        x_flat = x[:, :-1].reshape(-1, n_x)
+        u_flat = u.reshape(-1, n_u)
+        x_pred = self.dynamics.f(x_flat, u_flat, dt).reshape(x[:, 1:].shape)
+        dyn_viols_inf = torch.abs(x[:, 1:] - x_pred).amax(dim=(1, 2))
 
         # Underactuation violation
         if self.underactuation is not None:
-            uact_violation = self.underactuation.h(x_curr, u_curr)
-            max_uact_violation = torch.norm(uact_violation, p=float("inf"), dim=[1, 2])
+            uact_violation = self.underactuation.h(x_flat, u_flat)
+            max_uact_violation = (
+                torch.abs(uact_violation).reshape(batch_size, -1).amax(dim=1)
+            )
             constr_viols_inf = torch.maximum(constr_viols_inf, max_uact_violation)
 
         return cost, dyn_viols_inf, constr_viols_inf, comp_viols_inf
@@ -286,7 +312,7 @@ class Problem(ABC):
         batch_size = self.batch_size
         horizon = self.horizon
         n_x, n_u = self.n_x, self.n_u
-        n_h = self.n_h
+        x, u = solution_guess.x, solution_guess.u
 
         Q = torch.zeros((batch_size, horizon, n_x, n_x))
         q = torch.zeros((batch_size, horizon, n_x))
@@ -294,38 +320,34 @@ class Problem(ABC):
         r = torch.zeros((batch_size, horizon - 1, n_u))
         S = torch.zeros((batch_size, horizon - 1, n_u, n_x))
 
-        A = torch.zeros((batch_size, horizon - 1, n_x, n_x))
-        B = torch.zeros((batch_size, horizon - 1, n_x, n_u))
-        b = torch.zeros((batch_size, horizon - 1, n_x))
+        # Dynamics and underactuation do not depend on the stage, so evaluate
+        # them for all stages at once on the flattened (B * (H-1)) batch
+        x_flat = x[:, :-1].reshape(-1, n_x)
+        u_flat = u.reshape(-1, n_u)
+        stages = (batch_size, horizon - 1)
+        A = self.dynamics.fx(x_flat, u_flat, self.dt).reshape(*stages, n_x, n_x)
+        B = self.dynamics.fu(x_flat, u_flat, self.dt).reshape(*stages, n_x, n_u)
+        b = self.dynamics.f(x_flat, u_flat, self.dt).reshape(*stages, n_x) - x[:, 1:]
 
         C = None
         D = None
         d = None
         if self.underactuation is not None:
             n_h = self.n_h
-            C = torch.zeros((batch_size, horizon - 1, n_h, n_x))
-            D = torch.zeros((batch_size, horizon - 1, n_h, n_u))
-            d = torch.zeros((batch_size, horizon - 1, n_h))
+            C = self.underactuation.hx(x_flat, u_flat).reshape(*stages, n_h, n_x)
+            D = self.underactuation.hu(x_flat, u_flat).reshape(*stages, n_h, n_u)
+            d = self.underactuation.h(x_flat, u_flat).reshape(*stages, n_h)
 
-        M = None
-        N = None
-        n = None
-        if self.constraints is not None:
-            M = [None] * horizon
-            N = [None] * (horizon - 1)
-            n = [None] * horizon
+        # Stage constraints, padded to the largest stage dimension G
+        lb, ub = self.padded_bounds()
+        G = lb.shape[-1]
+        M = torch.zeros((batch_size, horizon, G, n_x))
+        N = torch.zeros((batch_size, horizon - 1, G, n_u))
+        n = torch.zeros((batch_size, horizon, G))
 
-        # Fill matrices
+        # Costs and constraints may differ per stage
         for k in range(horizon - 1):
-            x_lin, u_lin, x_next = (
-                solution_guess.x[:, k],
-                solution_guess.u[:, k],
-                solution_guess.x[:, k + 1],
-            )
-
-            A[:, k] = self.dynamics.fx(x_lin, u_lin, self.dt)
-            B[:, k] = self.dynamics.fu(x_lin, u_lin, self.dt)
-            b[:, k] = self.dynamics.f(x_lin, u_lin, self.dt) - x_next
+            x_lin, u_lin = x[:, k], u[:, k]
 
             Q[:, k] = self.lxx(k, x_lin, u_lin)
             q[:, k] = self.lx(k, x_lin, u_lin)
@@ -333,25 +355,22 @@ class Problem(ABC):
             r[:, k] = self.lu(k, x_lin, u_lin)
             S[:, k] = self.lux(k, x_lin, u_lin)
 
-            # Underactuation augmentation
-            if self.underactuation is not None:
-                C[:, k] = self.underactuation.hx(x_lin, u_lin)
-                D[:, k] = self.underactuation.hu(x_lin, u_lin)
-                d[:, k] = self.underactuation.h(x_lin, u_lin)
+            n_g = self.n_g(k)
+            if n_g > 0:
+                M[:, k, :n_g] = self.gx(k, x_lin, u_lin)
+                N[:, k, :n_g] = self.gu(k, x_lin, u_lin)
+                n[:, k, :n_g] = self.g(k, x_lin, u_lin)
 
-            if self.constraints[k] is not None:
-                M[k] = self.gx(k, x_lin, u_lin)
-                N[k] = self.gu(k, x_lin, u_lin)
-                n[k] = self.g(k, x_lin, u_lin)
-
-        x_F = solution_guess.x[:, -1]
+        x_F = x[:, -1]
         Q[:, -1] = self.lxx(-1, x_F)
         q[:, -1] = self.lx(-1, x_F)
 
-        if self.constraints[-1] is not None:
-            M[-1] = self.gx(-1, x_F)
-            n[-1] = self.g(-1, x_F)
+        n_g = self.n_g(horizon - 1)
+        if n_g > 0:
+            M[:, -1, :n_g] = self.gx(-1, x_F)
+            n[:, -1, :n_g] = self.g(-1, x_F)
 
         return QpParameters(
-            Q=Q, q=q, R=R, r=r, S=S, A=A, B=B, b=b, C=C, D=D, d=d, M=M, N=N, n=n
+            Q=Q, q=q, R=R, r=r, S=S, A=A, B=B, b=b, C=C, D=D, d=d, M=M, N=N, n=n,
+            lb=lb, ub=ub,
         )

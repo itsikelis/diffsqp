@@ -8,7 +8,11 @@ from typing import List
 
 from diffsqp.problems import Problem, ProblemParameters
 from diffsqp.solvers import QP
-from diffsqp.solvers import admm_qp_solve, lqr_solve
+from diffsqp.solvers import admm_qp_solve, admm_qp_resume, lqr_solve
+from diffsqp.solvers.admm_qp import constraint_map
+from diffsqp.solvers.lqr import lqr_with_offsets, lqr_solve_factorized
+from diffsqp.solvers.line_search import make_line_search
+from diffsqp.utils.math import bmv
 from dataclasses import dataclass
 from diffsqp.types import SqpSolution, AdmmSolution, LqrSolution
 
@@ -31,6 +35,13 @@ class SqpParameters:
             "admm_warm_start_unconstrained"
         ]
         self.admm_reset_ksi: float = args["admm_reset_ksi"]
+        # Start the consensus variables z at the projection of the warm start
+        self.admm_warm_start_z: bool = args.get("admm_warm_start_z", False)
+        # Inexact QP safeguard: resume ADMM (up to admm_max_resumes times) for
+        # elements whose step does not reduce the linearized constraint
+        # violation to admm_resume_kappa * current violation. 0 disables it.
+        self.admm_resume_kappa: float = args.get("admm_resume_kappa", 0.0)
+        self.admm_max_resumes: int = args.get("admm_max_resumes", 3)
         self.admm_abs_tolerance = args["admm_abs_tolerance"]
         self.admm_abs_tolerance_final = args["admm_abs_tolerance_final"]
         self.admm_rel_tolerance = args["admm_rel_tolerance"]
@@ -39,14 +50,24 @@ class SqpParameters:
 
         self.sqp_max_iter: int = args["sqp_max_iter"]
         self.lqr_reg_init: int = args["lqr_reg_init"]
+        # Solve the LQR recursions with a parallel scan (fewer, larger ops)
+        self.lqr_parallel_scan: bool = args.get("lqr_parallel_scan", False)
         self.armijo_beta: float = args["armijo_beta"]
         self.merit_mu: float = args["merit_mu"]
+        # Initial penalty of the "merit_adaptive" line search (it only grows)
+        self.merit_mu_init: float = args.get("merit_mu_init", 1.0)
         self.ls_max_iter: int = args["ls_max_iter"]
         self.check_complementarity: float = args["check_complementarity"]
+        # Multiply the LQR regularization by 10 after a failed line search
+        self.ls_fail_increase_reg: bool = args.get("ls_fail_increase_reg", True)
+        # Try a second-order correction when the full step is rejected
+        self.second_order_correction: bool = args.get("second_order_correction", False)
         self.sqp_cost_eps: float = args["sqp_cost_eps"]
         self.sqp_viol_eps: float = args["sqp_viol_eps"]
         self.qp_solver: str = args["qp_solver"]
         self.ls_function: str = args["ls_function"]
+        # Print progress (line search acceptances, failures, rho updates)
+        self.verbose: bool = args.get("verbose", True)
 
     def __str__(self) -> str:
         return (
@@ -55,7 +76,8 @@ class SqpParameters:
             f" Line Search Fn  : {self.ls_function}\n"
             f" SQP Max Iter    : {self.sqp_max_iter}\n"
             f" Line Search Max : {self.ls_max_iter}\n"
-            f" SQP Tolerance   : {self.sqp_eps:.2e}\n"
+            f" SQP Cost Tol.   : {self.sqp_cost_eps:.2e}\n"
+            f" SQP Viol. Tol.  : {self.sqp_viol_eps:.2e}\n"
             f"======================"
         )
 
@@ -121,8 +143,86 @@ class SqpSolutionLog:
             json.dump(self.__dict__, f, indent=4)
 
 
+def _step(guess: SqpSolution, alpha: torch.Tensor, direction: AdmmSolution):
+    """Trial point guess + alpha * direction, with the QP multipliers."""
+    a = alpha.view(-1, 1, 1)
+    return SqpSolution(
+        x=guess.x + a * direction.dx,
+        u=guess.u + a * direction.du,
+        mu=direction.mu,
+        nu=direction.nu,
+        ksi=direction.ksi,
+    )
+
+
+def _select(mask: torch.Tensor, new: SqpSolution, old: SqpSolution):
+    """Per batch element choice between two guesses (new where mask)."""
+    m = mask.view(-1, 1, 1)
+    ksi = new.ksi
+    if torch.is_tensor(old.ksi):
+        ksi = torch.where(m, new.ksi, old.ksi)
+    return SqpSolution(
+        x=torch.where(m, new.x, old.x),
+        u=torch.where(m, new.u, old.u),
+        mu=torch.where(m, new.mu, old.mu),
+        nu=torch.where(m, new.nu, old.nu),
+        ksi=ksi,
+    )
+
+
+def _step_curvature(mat, direction: AdmmSolution):
+    """d^T H d of the QP cost Hessian along the step."""
+    dx, du = direction.dx, direction.du
+    dx_head = dx[:, :-1]
+    curvature = torch.sum(dx * bmv(mat.Q, dx), dim=(1, 2))
+    curvature += torch.sum(du * bmv(mat.R, du), dim=(1, 2))
+    curvature += 2.0 * torch.sum(du * bmv(mat.S, dx_head), dim=(1, 2))
+    return curvature
+
+
+def _linearized_violation(mat, direction: AdmmSolution):
+    """Stage constraint violation of the linearized constraints after the
+    full step. Dynamics and underactuation are enforced exactly by the
+    Riccati recursion, so only the ADMM-handled bounds can remain violated."""
+    if mat.lb.shape[-1] == 0:
+        return torch.zeros(direction.dx.shape[0])
+    g = mat.n + constraint_map(mat, direction.dx, direction.du)
+    viol = torch.maximum(torch.relu(mat.lb - g), torch.relu(g - mat.ub))
+    return viol.amax(dim=(1, 2))
+
+
+def _second_order_correction(problem, direction, admm_log, trial):
+    """Second-order correction of a rejected full step (Nocedal & Wright 18.3).
+
+    The equality constraints (dynamics and underactuation) are re-linearized
+    residuals at the trial point: the correction d_c solves A d_c = -c(x + d)
+    with the minimum (ADMM-augmented) cost. The QP matrices are unchanged, so
+    the last ADMM factorization is reused: one cheap LQR solve.
+    """
+    gaps, h = problem.equality_residuals(trial.x, trial.u)
+    fact = lqr_with_offsets(admm_log.factorization, gaps, h)
+    correction = lqr_solve_factorized(
+        fact, torch.zeros_like(direction.dx), torch.zeros_like(direction.du)
+    )
+    return AdmmSolution(
+        dx=direction.dx + correction.dx,
+        du=direction.du + correction.du,
+        mu=direction.mu,
+        nu=direction.nu,
+        z=direction.z,
+        ksi=direction.ksi,
+        rho=direction.rho,
+        rho_inv=direction.rho_inv,
+        rho_common=direction.rho_common,
+    )
+
+
 def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSolution):
     batch_size = problem.batch_size
+    verbose = parameters.verbose
+
+    # Constraints may have changed since the last solve
+    problem.padded_bounds(refresh=True)
 
     terminated = torch.zeros((batch_size), dtype=torch.bool)
     reg_incr = torch.zeros((batch_size,))
@@ -131,11 +231,9 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
     best_cost, best_dyn_inf, best_constr_inf, best_comp_inf = problem.evaluate_guess(
         current_guess
     )
-    if parameters.ls_function == "merit":
-        # Merit function
-        merit_mu = parameters.merit_mu
-        convergence_error = torch.maximum(best_dyn_inf, best_constr_inf)
-        best_phi = best_cost + parameters.merit_mu * convergence_error
+    line_search = make_line_search(
+        parameters, batch_size, best_cost, best_dyn_inf, best_constr_inf
+    )
 
     sqp_log = SqpSolutionLog()
     admm_solution = None
@@ -155,6 +253,31 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                 problem, parameters, mat, lqr_reg, admm_solution
             )
 
+            # Inexact QP safeguard
+            theta = torch.maximum(best_dyn_inf, best_constr_inf)
+            theta_lin = _linearized_violation(mat, admm_solution)
+            if parameters.admm_resume_kappa > 0.0:
+                for _ in range(parameters.admm_max_resumes):
+                    inaccurate = (
+                        (theta_lin > parameters.admm_resume_kappa * theta)
+                        & (theta > parameters.sqp_viol_eps)
+                        & ~terminated
+                        & ~admm_log.failed
+                    )
+                    if not inaccurate.any():
+                        break
+                    admm_solution, admm_log = admm_qp_resume(
+                        problem,
+                        parameters,
+                        mat,
+                        lqr_reg,
+                        admm_solution,
+                        admm_log,
+                        inaccurate,
+                        parameters.admm_max_iter,
+                    )
+                    theta_lin = _linearized_violation(mat, admm_solution)
+
             #################
             ## Line search ##
             #################
@@ -162,93 +285,92 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
 
             # If not line search, accept change and break
             if parameters.ls_max_iter == 0:
-                current_guess = SqpSolution(
-                    x=current_guess.x
-                    + torch.einsum("b,bhj->bhj", alpha, admm_solution.dx),
-                    u=current_guess.u
-                    + torch.einsum("b,bhj->bhj", alpha, admm_solution.du),
-                    mu=admm_solution.mu,
-                    nu=admm_solution.nu,
-                    ksi=admm_solution.ksi,
-                )
+                current_guess = _step(current_guess, alpha, admm_solution)
                 break
 
-            # Directional Derivative for Armijo check
-            if parameters.ls_function == "merit":
-                l_dir_deriv = problem.evaluate_directional_derivatives(
-                    current_guess, admm_solution
-                )
+            # Directional derivative of the cost and curvature along the step
+            grad_dot_d = problem.evaluate_directional_derivatives(
+                current_guess, admm_solution, mat
+            )
+            dHd = _step_curvature(mat, admm_solution)
+            line_search.begin(
+                sqp_iter,
+                best_cost,
+                best_dyn_inf,
+                best_constr_inf,
+                grad_dot_d,
+                dHd,
+                theta_lin,
+            )
 
-            dones = terminated.detach().clone()
+            # Elements whose QP failed take no step
+            dones = terminated | admm_log.failed
             for ls_iter in range(parameters.ls_max_iter):
-                new_guess = SqpSolution(
-                    x=current_guess.x
-                    + torch.einsum("b,bhj->bhj", alpha, admm_solution.dx),
-                    u=current_guess.u
-                    + torch.einsum("b,bhj->bhj", alpha, admm_solution.du),
-                    mu=admm_solution.mu,
-                    nu=admm_solution.nu,
-                    ksi=admm_solution.ksi,
-                )
+                new_guess = _step(current_guess, alpha, admm_solution)
 
                 # Evaluate current alpha
                 cost, dyn_inf, constr_inf, comp_inf = problem.evaluate_guess(new_guess)
-                # Backtracking line search option
-                if parameters.ls_function == "filter":
-                    cost_improved = cost < best_cost
-                    dyn_inf_improved = dyn_inf < best_dyn_inf
-                    constr_inf_improved = constr_inf < best_constr_inf
-                    # print(
-                    #     f"Cost:, {cost.tolist()} \ {best_cost.tolist()} Dyn inf: {dyn_inf.tolist()} \ {best_dyn_inf.tolist()} Dyn inf: {constr_inf.tolist()} \ {best_constr_inf.tolist()}"
-                    # )
-                    update_mask = cost_improved | dyn_inf_improved | constr_inf_improved
-                # Merit function option
-                elif parameters.ls_function == "merit":
-                    convergence_error = torch.maximum(dyn_inf, constr_inf)
-                    phi = cost + parameters.merit_mu * convergence_error
-                    armijo_threshold = (
-                        best_phi + parameters.armijo_beta * alpha * l_dir_deriv
-                    )
-                    update_mask = phi < armijo_threshold
+                update_mask = line_search.accept(
+                    alpha, cost, dyn_inf, constr_inf, active=~dones
+                )
 
-                update_mask = update_mask & ~dones
-                if update_mask.any():
-                    # Update relevant variables
-                    current_guess.x[:][update_mask] = new_guess.x[:][update_mask]
-                    current_guess.u[:][update_mask] = new_guess.u[:][update_mask]
-                    current_guess.mu[:][update_mask] = new_guess.mu[:][update_mask]
-                    current_guess.nu[:][update_mask] = new_guess.nu[:][update_mask]
-                    # Mark environments as finished
-                    dones[update_mask] = True
-                    # Update best filter and merit candidates
-                    best_cost[update_mask] = cost[update_mask]
-                    best_dyn_inf[update_mask] = dyn_inf[update_mask]
-                    best_constr_inf[update_mask] = constr_inf[update_mask]
-                    best_comp_inf[update_mask] = comp_inf[update_mask]
-                    if parameters.ls_function == "merit":
-                        best_phi[update_mask] = phi[update_mask]
-                    # print(
-                    #     "SQP Iter: ",
-                    #     sqp_iter,
-                    #     "LS Iter: ",
-                    #     ls_iter,
-                    #     "Cost: ",
-                    #     torch.max(best_cost),
-                    #     "Conv Error: ",
-                    #     torch.max(best_dyn_inf),
-                    #     torch.max(best_constr_inf),
-                    # )
+                # Full step rejected: try the second-order corrected step
+                rejected = ~update_mask & ~dones
+                if (
+                    ls_iter == 0
+                    and parameters.second_order_correction
+                    and rejected.any()
+                ):
+                    soc_direction = _second_order_correction(
+                        problem, admm_solution, admm_log, new_guess
+                    )
+                    soc_guess = _step(current_guess, alpha, soc_direction)
+                    soc_eval = problem.evaluate_guess(soc_guess)
+                    soc_mask = line_search.accept(alpha, *soc_eval[:3], active=rejected)
+                    new_guess = _select(soc_mask, soc_guess, new_guess)
+                    cost, dyn_inf, constr_inf, comp_inf = (
+                        torch.where(soc_mask, a, b)
+                        for a, b in zip(soc_eval, (cost, dyn_inf, constr_inf, comp_inf))
+                    )
+                    update_mask = update_mask | soc_mask
+
+                # Update relevant variables
+                current_guess = _select(update_mask, new_guess, current_guess)
+                # Mark environments as finished
+                dones = dones | update_mask
+                # Update best filter and merit candidates
+                best_cost = torch.where(update_mask, cost, best_cost)
+                best_dyn_inf = torch.where(update_mask, dyn_inf, best_dyn_inf)
+                best_constr_inf = torch.where(update_mask, constr_inf, best_constr_inf)
+                best_comp_inf = torch.where(update_mask, comp_inf, best_comp_inf)
 
                 # Decrease alpha
-                alpha[~dones] *= 0.5
+                alpha = torch.where(dones, alpha, 0.5 * alpha)
                 if torch.all(dones):
                     break
+            line_search.end()
 
-            ls_failed = (~dones) & (~terminated)
+            if verbose:
+                print(
+                    "SQP Iter: ",
+                    sqp_iter,
+                    "LS Iter: ",
+                    ls_iter,
+                    "Cost: ",
+                    torch.max(best_cost),
+                    "Conv Error: ",
+                    torch.max(best_dyn_inf),
+                    torch.max(best_constr_inf),
+                )
+
+            ls_failed = (~dones | admm_log.failed) & (~terminated)
+            if not parameters.ls_fail_increase_reg:
+                # Only failed factorizations need more regularization
+                ls_failed = admm_log.failed & ~terminated
             if ls_failed.any():
-                print("Line search failed")
-                reg_incr[ls_failed] += 1.0
-                reg_incr[~ls_failed] = 0.0
+                if verbose:
+                    print("Line search failed")
+                reg_incr = torch.where(ls_failed, reg_incr + 1.0, 0.0)
             else:
                 reg_incr.zero_()
 
@@ -271,15 +393,8 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
 
             ## Primal Feasibility ##
             # Computing Lx, Lu is expensive, so we check for stationarity in dx.T @ dx, du.T @ du
-            dot_delta_x = torch.einsum(
-                "bhi,bhi->bh", admm_solution.dx, admm_solution.dx
-            )
-            dot_delta_u = torch.einsum(
-                "bhi,bhi->bh", admm_solution.du, admm_solution.du
-            )
-            dx_inf = torch.norm(dot_delta_x, p=float("inf"), dim=[1])
-            du_inf = torch.norm(dot_delta_u, p=float("inf"), dim=[1])
-            # print(f"Dx_inf: {dx_inf} Du_inf: {du_inf}")
+            dx_inf = torch.sum(admm_solution.dx**2, dim=-1).amax(dim=1)
+            du_inf = torch.sum(admm_solution.du**2, dim=-1).amax(dim=1)
             stationarity = torch.logical_and(
                 dx_inf < parameters.sqp_cost_eps,
                 du_inf < parameters.sqp_cost_eps,

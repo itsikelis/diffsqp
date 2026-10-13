@@ -1,9 +1,13 @@
-from typing import NamedTuple, List, Optional
+from typing import NamedTuple, Optional
 import torch
 
 
 class AdmmLog(NamedTuple):
-    iterations: torch.Tensor
+    iterations: int
+    # (B,) True where the LQR factorization failed, even after regularization
+    failed: Optional[torch.Tensor] = None
+    # Last LQR factorization, to resume ADMM without refactorizing
+    factorization: Optional[object] = None
 
     def __str__(self) -> str:
         return (

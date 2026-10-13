@@ -62,6 +62,23 @@ On CPU with small batches, limiting PyTorch to one thread is much faster (about 
 OMP_NUM_THREADS=1 uv run examples/cartpole_forward.py --batch_size 4
 ```
 
+## Solver options
+
+`SqpParameters` takes the keys used in the examples. These optional keys were added with the solver rework; all default to the original behavior:
+
+| Key | Default | Effect |
+|---|---|---|
+| `ls_function` | — | `"filter"` / `"merit"` (original), `"merit_adaptive"` (exact penalty with the correct directional derivative and a per-problem penalty that grows as needed), `"filter_ipopt"` (filter with memory and sufficient-decrease margins, Wächter & Biegler) |
+| `merit_mu_init` | `1.0` | Initial penalty of `merit_adaptive` |
+| `second_order_correction` | `False` | When the full step is rejected, retry it with a second-order correction (one extra LQR solve with the cached factorization) |
+| `admm_resume_kappa` | `0.0` (off) | Resume ADMM for problems whose step does not reduce the linearized constraint violation below `kappa` times the current one (up to `admm_max_resumes`, default 3, extra rounds of `admm_max_iter`) |
+| `admm_warm_start_z` | `False` | Start the ADMM slack variables at the projection of the warm start instead of zero |
+| `ls_fail_increase_reg` | `True` | Multiply the LQR regularization by 10 after a failed line search |
+| `lqr_parallel_scan` | `False` | Solve the LQR recursions with a parallel scan: faster for small batches, slower for large ones |
+| `verbose` | `True` | Print per-iteration progress |
+
+On the toy problems (`tests/benchmark_robustness.py`, 128 perturbed starts per case), `"ls_function": "merit_adaptive"` with `"second_order_correction": True` solved every forward-dynamics cart-pole start in fewer iterations than the original filter. Adding `"admm_resume_kappa": 0.5` helps the hardest inverse-dynamics starts at about 2.5x the solve time.
+
 ## Visualization
 
 `visuals/visualize_trajectory.py` plays back a saved batch of trajectories, drawing one robot per batch element on a grid:
@@ -102,8 +119,18 @@ The scripts can be launched from any directory. Results are written to `results/
 
 ## Tests
 
+`tests/` holds small toy problems (`tests/toy_problems.py`: constrained double integrator, cart-pole with forward and with inverse dynamics), correctness checks and two benchmarks:
+
 ```bash
-uv run python test/test_lqr_cost.py
+# LQR vs a dense KKT solve, ADMM vs cvxpy, second-order correction, and the
+# legacy line searches reproducing the original solver's iterates
+uv run python tests/test_solver_correctness.py
+
+# Milliseconds per ADMM iteration for a fixed amount of work
+OMP_NUM_THREADS=1 uv run python tests/benchmark_speed.py --devices cpu cuda --batch_sizes 4 1024
+
+# Success rate over many perturbed initial states, per solver variant
+OMP_NUM_THREADS=1 uv run python tests/benchmark_robustness.py --problems cartpole_forward --noise 10 30
 ```
 
 ## Project Structure
@@ -113,4 +140,4 @@ uv run python test/test_lqr_cost.py
 - `paper_experiments/`: Experiment and benchmark scripts used for the paper.
 - `visuals/`: Trajectory playback and figure-generation tools based on viser.
 - `resources/robots/`: URDFs and meshes (cart-pole, acrobot, quadrotor, Franka FP3).
-- `test/`: Derivative checks.
+- `tests/`: Toy problems, solver correctness checks and speed/robustness benchmarks.
