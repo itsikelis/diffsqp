@@ -5,7 +5,7 @@
 ## Features
 
 * **PyTorch-Native:** Leverages PyTorch for tensor operations and GPU acceleration, allowing you to solve batches of optimization problems in parallel.
-* **Modular Dynamics & Costs:** Includes built-in models for the CartPole, Acrobot and quadrotor, and makes it easy to plug in your own dynamics, costs and constraints (e.g. a Franka arm using [bard](https://github.com/YueWang996/bard-pytorch-dynamics) kinematics).
+* **Modular Dynamics & Costs:** Includes built-in models for the CartPole, Acrobot and quadrotor, and makes it easy to plug in your own dynamics, costs and constraints (e.g. a Franka arm using [bard](https://github.com/YueWang996/bard-pytorch-dynamics) kinematics, or the Franka and Go2 with [gdyn](https://github.com/itsikelis/gdyn) RNEA derivatives).
 * **Forward & Inverse Dynamics:** Configure the solver to optimize over states and controls directly, or use inverse dynamics constraints depending on your problem setup.
 * **Visualization:** Play back batches of optimized trajectories in the browser with [viser](https://viser.studio).
 
@@ -45,6 +45,8 @@ The `examples/` folder contains small, self-contained scripts. Each one solves a
 | `examples/cartpole_inverse.py` | Cart-pole swing-up with inverse dynamics and an underactuation constraint |
 | `examples/quadrotor_se3_trajopt.py` | Quadrotor point-to-point flight on SE(3) (quaternion orientation) |
 | `examples/franka_constrained.py` | Franka FP3 end-effector reaching with joint position and velocity limits, using user-defined dynamics and cost classes |
+| `examples/go2_inverse_riccati.py` | Go2 standing base-pose shift with inverse dynamics (u = accelerations and foot forces), sticking contacts and friction cones; the 6 floating-base rows are an underactuation constraint in the Riccati, the joint torque limits are in ADMM |
+| `examples/go2_inverse_admm.py` | Same Go2 problem with all inverse-dynamics rows in ADMM (base rows as equality rows) |
 
 All examples take the same arguments:
 
@@ -94,6 +96,9 @@ uv run visuals/visualize_trajectory.py --urdf quadrotor.urdf --floating_base --f
 
 # Franka, with the target configuration drawn as translucent ghosts
 uv run visuals/visualize_trajectory.py --urdf fp3.urdf --show_target --spacing_x 1.5 --spacing_y 1.5 --file out/franka.pt --batch_size 4
+
+# Go2 (gdyn state layout: xyzw quaternion; feet are 22 mm spheres centred at z = 0), in real time
+uv run visuals/visualize_trajectory.py --urdf go2.urdf --floating_base --quat_order xyzw --show_target --floor_z -0.022 --dt 0.02 --file out/go2_riccati.pt --batch_size 8
 ```
 
 Open http://localhost:8080 and press **Play Trajectory**. To download the playback as a GIF, add `--record` (use `--record_skip N` to keep every N-th frame). **Take Snapshot** saves a PNG. Run with `--help` to see all options (grid layout, camera, playback speed).
@@ -144,5 +149,5 @@ OMP_NUM_THREADS=1 uv run python tests/benchmark_robustness.py --problems cartpol
 - `examples/`: Proof-of-concept scripts showing how to set up and solve problems.
 - `paper_experiments/`: Experiment and benchmark scripts used for the paper.
 - `visuals/`: Trajectory playback and figure-generation tools based on viser.
-- `resources/robots/`: URDFs and meshes (cart-pole, acrobot, quadrotor, Franka FP3).
+- `resources/robots/`: URDFs and meshes (cart-pole, acrobot, quadrotor, Franka FP3, Unitree Go2).
 - `tests/`: Toy problems, solver correctness checks and speed/robustness benchmarks.

@@ -7,21 +7,28 @@ State layout:
   * fixed base (default): x[:n_joints] are the actuated joint positions
     (cartpole, acrobot, franka).
   * --floating_base: x[0:3] is the base position, x[3:7] the base quaternion
-    (wxyz), followed by any joint positions (quadrotor).
+    (--quat_order, wxyz by default), followed by any joint positions
+    (quadrotor, go2). A `floating` root joint in the URDF is removed, since the
+    base pose comes from the state.
 
     uv run visuals/visualize_trajectory.py --urdf cartpole.urdf --file out/cartpole.pt --batch_size 16
     uv run visuals/visualize_trajectory.py --urdf quadrotor.urdf --floating_base --file out/quad.pt
+    uv run visuals/visualize_trajectory.py --urdf go2.urdf --floating_base --quat_order xyzw --file out/go2.pt --batch_size 8 --dt 0.02
 """
 
 import argparse
+import io
 import threading
 import time
+import xml.etree.ElementTree as ET
+from functools import partial
 from pathlib import Path
 
 import imageio.v3 as iio
 import numpy as np
 import torch
 import viser
+import yourdfpy
 from viser.extras import ViserUrdf
 
 
@@ -32,6 +39,31 @@ def resolve_urdf_path(filename):
         return path.resolve()
     base_dir = Path(__file__).resolve().parent.parent
     return base_dir / "resources" / "robots" / filename
+
+
+def load_urdf(urdf_path, floating_base):
+    """The URDF for ViserUrdf. With a floating base, `floating` joints and the
+    root links they leave without children are removed, so the actuated joints
+    are only the ones after the base (the base pose comes from the state)."""
+    if not floating_base:
+        return urdf_path
+    root = ET.parse(urdf_path).getroot()
+    floating = [j for j in root.findall("joint") if j.get("type") == "floating"]
+    if not floating:
+        return urdf_path
+    for joint in floating:
+        parent = joint.find("parent").get("link")
+        root.remove(joint)
+        if not any(
+            j.find("parent").get("link") == parent for j in root.findall("joint")
+        ):
+            root.remove(
+                next(l for l in root.findall("link") if l.get("name") == parent)
+            )
+    return yourdfpy.URDF.load(
+        io.StringIO(ET.tostring(root, encoding="unicode")),
+        filename_handler=partial(yourdfpy.filename_handler_magic, dir=urdf_path.parent),
+    )
 
 
 def compute_grid_transforms(batch_size, spacing_x, spacing_y, n_rows, n_cols):
@@ -63,16 +95,26 @@ def compute_grid_transforms(batch_size, spacing_x, spacing_y, n_rows, n_cols):
 class RobotInstance:
     """One URDF in the scene, driven by a state vector."""
 
-    def __init__(self, server, urdf_path, node_name, position, floating_base, color):
+    def __init__(
+        self,
+        server,
+        urdf_path,
+        node_name,
+        position,
+        floating_base,
+        color,
+        quat_order="xyzw",
+    ):
         self.base = server.scene.add_frame(node_name, show_axes=False)
         self.robot = ViserUrdf(
             server,
-            urdf_or_path=urdf_path,
+            urdf_or_path=load_urdf(urdf_path, floating_base),
             root_node_name=node_name,
             mesh_color_override=color,
         )
         self.offset = position
         self.floating_base = floating_base
+        self.quat_order = quat_order
         self.n_joints = len(self.robot.get_actuated_joint_limits())
         self.base.position = position
 
@@ -80,7 +122,10 @@ class RobotInstance:
         joint_start = 0
         if self.floating_base:
             self.base.position = self.offset + x[0:3]
-            self.base.wxyz = x[3:7]
+            quat = x[3:7]
+            if self.quat_order == "xyzw":
+                quat = np.concatenate([quat[3:], quat[:3]])
+            self.base.wxyz = quat / np.linalg.norm(quat)
             joint_start = 7
         if self.n_joints > 0:
             self.robot.update_cfg(x[joint_start : joint_start + self.n_joints])
@@ -111,7 +156,13 @@ def main(args):
 
     robots = [
         RobotInstance(
-            server, urdf_path, f"/robot_{i}", positions[i], args.floating_base, None
+            server,
+            urdf_path,
+            f"/robot_{i}",
+            positions[i],
+            args.floating_base,
+            None,
+            args.quat_order,
         )
         for i in range(args.batch_size)
     ]
@@ -125,6 +176,7 @@ def main(args):
                 positions[i],
                 args.floating_base,
                 (0.0, 0.0, 0.0, 0.2),
+                args.quat_order,
             )
             for i in range(args.batch_size)
         ]
@@ -220,6 +272,12 @@ if __name__ == "__main__":
         "--floating_base",
         action="store_true",
         help="State starts with base position + wxyz quaternion",
+    )
+    parser.add_argument(
+        "--quat_order",
+        choices=["wxyz", "xyzw"],
+        default="xyzw",
+        help="Base quaternion layout in the state (xyzw: gdyn / Pinocchio, e.g. go2)",
     )
     parser.add_argument(
         "--show_target", action="store_true", help="Draw translucent robots at x_des"

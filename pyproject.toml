@@ -8,6 +8,7 @@ dependencies = [
     "bard",
     "bsqp",
     "cvxpylayers>=1.0.1",
+    "gdyn",
     "matplotlib>=3.10.8",
     "opt-einsum>=3.4.0",
     "pyyaml>=6.0.3",
@@ -27,3 +28,4 @@ bard = { git = "https://github.com/YueWang996/bard-pytorch-dynamics" }
 torch = { index = "pytorch-cu132" }
 torchvision = { index = "pytorch-cu132" }
 bsqp = { git = "ssh://git@github.com/itsikelis/bsqp.git" }
+gdyn = { git = "ssh://git@github.com/itsikelis/gdyn.git" }
