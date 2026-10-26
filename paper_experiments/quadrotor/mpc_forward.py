@@ -199,6 +199,11 @@ def main(args):
     sqp_parameters.admm_max_iter = 5
     sqp_parameters.sqp_max_iter = 1
 
+    true_trajectory = [true_state.squeeze().cpu()]
+    applied_controls = []
+    dt_solver = problem_parameters.dt
+    accumulated_time = 0.0
+
     # --- 1) MPC Loop ---
     print(f"Starting MPC loop ({N_mpc} iterations, dt_mpc={dt_mpc})...")
     for mpc_step in range(N_mpc):
