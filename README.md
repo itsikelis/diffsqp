@@ -64,10 +64,12 @@ OMP_NUM_THREADS=1 uv run examples/cartpole_forward.py --batch_size 4
 
 ## Solver options
 
-`SqpParameters` takes the keys used in the examples. These optional keys were added with the solver rework; all default to the original behavior:
+`SqpParameters` takes the keys used in the examples. These optional keys were added with the solver rework; all but `admm_backend` default to the original behavior:
 
 | Key | Default | Effect |
 |---|---|---|
+| `admm_backend` | `"bsqp"` | ADMM of the QP subproblem: `"bsqp"` (C++/OpenMP or CUDA kernels of [bsqp](https://github.com/itsikelis/bsqp)) or `"torch"` (the original PyTorch implementation). bsqp's dual residual is the QP stationarity, so it stops later than `"torch"` for the same tolerances; tolerance schedules (`admm_*_tolerance_final`) are `"torch"` only |
+| `admm_check_every` | `1` | `"bsqp"` only: residual and termination check period, in ADMM iterations |
 | `ls_function` | — | `"filter"` / `"merit"` (original), `"merit_adaptive"` (exact penalty with the correct directional derivative and a per-problem penalty that grows as needed), `"filter_ipopt"` (filter with memory and sufficient-decrease margins, Wächter & Biegler) |
 | `merit_mu_init` | `1.0` | Initial penalty of `merit_adaptive` |
 | `second_order_correction` | `False` | When the full step is rejected, retry it with a second-order correction (one extra LQR solve with the cached factorization) |
@@ -122,12 +124,15 @@ The scripts can be launched from any directory. Results are written to `results/
 `tests/` holds small toy problems (`tests/toy_problems.py`: constrained double integrator, cart-pole with forward and with inverse dynamics), correctness checks and two benchmarks:
 
 ```bash
-# LQR vs a dense KKT solve, ADMM vs cvxpy, second-order correction, and the
+# LQR vs a dense KKT solve, ADMM vs cvxpy, bsqp vs torch ADMM, second-order correction, and the
 # legacy line searches reproducing the original solver's iterates
 uv run python tests/test_solver_correctness.py
 
 # Milliseconds per ADMM iteration for a fixed amount of work
 OMP_NUM_THREADS=1 uv run python tests/benchmark_speed.py --devices cpu cuda --batch_sizes 4 1024
+
+# Torch vs bsqp ADMM on every example: wall / QP time and solution differences
+OMP_NUM_THREADS=1 uv run python tests/compare_admm_backends.py --devices cpu cuda
 
 # Success rate over many perturbed initial states, per solver variant
 OMP_NUM_THREADS=1 uv run python tests/benchmark_robustness.py --problems cartpole_forward --noise 10 30

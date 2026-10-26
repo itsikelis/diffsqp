@@ -10,6 +10,12 @@ from diffsqp.problems import Problem, ProblemParameters
 from diffsqp.solvers import QP
 from diffsqp.solvers import admm_qp_solve, admm_qp_resume, lqr_solve
 from diffsqp.solvers.admm_qp import constraint_map
+from diffsqp.solvers.admm_bsqp import (
+    BsqpState,
+    bsqp_equality_correction,
+    bsqp_qp_resume,
+    bsqp_qp_solve,
+)
 from diffsqp.solvers.lqr import lqr_with_offsets, lqr_solve_factorized
 from diffsqp.solvers.line_search import make_line_search
 from diffsqp.utils.math import bmv
@@ -19,6 +25,10 @@ from diffsqp.types import SqpSolution, AdmmSolution, LqrSolution
 
 class SqpParameters:
     def __init__(self, **args):
+        # ADMM implementation: "bsqp" (C++/CUDA kernels) or "torch"
+        self.admm_backend: str = args.get("admm_backend", "bsqp")
+        # bsqp only: residual / termination check period, in ADMM iterations
+        self.admm_check_every: int = args.get("admm_check_every", 1)
         self.admm_max_iter: int = args["admm_max_iter"]
         self.admm_alpha: float = args["admm_alpha"]
         self.admm_sigma: float = args["admm_sigma"]
@@ -200,13 +210,17 @@ def _second_order_correction(problem, direction, admm_log, trial):
     the last ADMM factorization is reused: one cheap LQR solve.
     """
     gaps, h = problem.equality_residuals(trial.x, trial.u)
-    fact = lqr_with_offsets(admm_log.factorization, gaps, h)
-    correction = lqr_solve_factorized(
-        fact, torch.zeros_like(direction.dx), torch.zeros_like(direction.du)
-    )
+    if isinstance(admm_log.factorization, BsqpState):
+        dx_c, du_c = bsqp_equality_correction(admm_log.factorization, gaps, h)
+    else:
+        fact = lqr_with_offsets(admm_log.factorization, gaps, h)
+        correction = lqr_solve_factorized(
+            fact, torch.zeros_like(direction.dx), torch.zeros_like(direction.du)
+        )
+        dx_c, du_c = correction.dx, correction.du
     return AdmmSolution(
-        dx=direction.dx + correction.dx,
-        du=direction.du + correction.du,
+        dx=direction.dx + dx_c,
+        du=direction.du + du_c,
         mu=direction.mu,
         nu=direction.nu,
         z=direction.z,
@@ -220,6 +234,12 @@ def _second_order_correction(problem, direction, admm_log, trial):
 def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSolution):
     batch_size = problem.batch_size
     verbose = parameters.verbose
+    if parameters.admm_backend == "bsqp":
+        qp_solve, qp_resume = bsqp_qp_solve, bsqp_qp_resume
+    elif parameters.admm_backend == "torch":
+        qp_solve, qp_resume = admm_qp_solve, admm_qp_resume
+    else:
+        raise ValueError(f"unknown admm_backend {parameters.admm_backend!r}")
 
     # Constraints may have changed since the last solve
     problem.padded_bounds(refresh=True)
@@ -249,7 +269,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
             ## Linearize problem ##
             mat = problem.linearize(current_guess)
 
-            admm_solution, admm_log = admm_qp_solve(
+            admm_solution, admm_log = qp_solve(
                 problem, parameters, mat, lqr_reg, admm_solution
             )
 
@@ -266,7 +286,7 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
                     )
                     if not inaccurate.any():
                         break
-                    admm_solution, admm_log = admm_qp_resume(
+                    admm_solution, admm_log = qp_resume(
                         problem,
                         parameters,
                         mat,

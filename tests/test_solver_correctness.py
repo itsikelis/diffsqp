@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import toy_problems  # noqa: E402
 
 from diffsqp.solvers import admm_qp_solve, sqp_solve, SqpParameters  # noqa: E402
+from diffsqp.solvers.admm_bsqp import bsqp_qp_solve  # noqa: E402
 from diffsqp.solvers.lqr import lqr_factorize, lqr_solve_factorized  # noqa: E402
 from diffsqp.types import QpParameters  # noqa: E402
 
@@ -211,6 +212,34 @@ def test_admm_matches_cvxpy():
         torch.testing.assert_close(solution.du[b], du_ref, rtol=0, atol=1e-5)
 
 
+def test_bsqp_admm_matches_torch():
+    """Converged bsqp and torch ADMM give the same QP solution, with and
+    without underactuation rows."""
+    for n_h in [0, 1]:
+        problem, mat = _random_lq(3, 10, n_x=4, n_u=2, n_h=n_h, n_g=3, seed=4)
+        # Infeasible with the default bounds and the underactuation rows
+        mat = mat._replace(lb=2.0 * mat.lb, ub=2.0 * mat.ub)
+        args = toy_problems.base_sqp_args(
+            admm_max_iter=4000,
+            admm_update_rho=True,
+            admm_rho_update_iter_freq=25,
+            admm_rho_init=1.0,
+            admm_abs_tolerance=1e-10,
+            admm_rel_tolerance=1e-10,
+        )
+        params = SqpParameters(**args)
+        params.admm_rho_min = params.admm_rho_min.to(DTYPE)
+        params.admm_rho_max = params.admm_rho_max.to(DTYPE)
+        ref, _ = admm_qp_solve(problem, params, mat, torch.zeros(3, dtype=DTYPE))
+        sol, log = bsqp_qp_solve(problem, params, mat, torch.zeros(3, dtype=DTYPE))
+        assert not log.failed.any()
+        for field in ["dx", "du", "ksi", "nu"]:
+            torch.testing.assert_close(
+                getattr(sol, field), getattr(ref, field), rtol=0, atol=1e-6,
+                msg=f"n_h={n_h} / {field}",
+            )
+
+
 def test_second_order_correction_reduces_residual():
     """Near a solution, the corrected step leaves a much smaller dynamics /
     underactuation residual than the plain full step (second order)."""
@@ -219,7 +248,12 @@ def test_second_order_correction_reduces_residual():
     default_dtype = torch.get_default_dtype()
     torch.set_default_dtype(DTYPE)
     try:
-        for name in ["cartpole_forward", "cartpole_inverse"]:
+        cases = [
+            (name, solve)
+            for name in ["cartpole_forward", "cartpole_inverse"]
+            for solve in [admm_qp_solve, bsqp_qp_solve]
+        ]
+        for name, qp_solve in cases:
             problem, guess, args = toy_problems.PROBLEMS[name](batch_size=8, seed=2)
             args.update(sqp_max_iter=8, ls_function="merit_adaptive", admm_max_iter=200)
             params = SqpParameters(**args)
@@ -227,7 +261,7 @@ def test_second_order_correction_reduces_residual():
                 guess, _ = sqp_solve(problem, params, guess)
 
             mat = problem.linearize(guess)
-            direction, log = admm_qp_solve(
+            direction, log = qp_solve(
                 problem, params, mat, torch.full((8,), 1e-5), None
             )
             alpha = torch.ones(8)
@@ -244,7 +278,7 @@ def test_second_order_correction_reduces_residual():
                 return r
 
             ratio = residual(trial) / residual(corrected)
-            assert ratio.min() > 2.0, (name, ratio)
+            assert ratio.min() > 2.0, (name, qp_solve.__name__, ratio)
     finally:
         torch.set_default_dtype(default_dtype)
 
@@ -279,6 +313,7 @@ def test_sqp_matches_baseline():
                     admm_max_iter=20,
                     ls_function=ls,
                     lqr_parallel_scan=parallel_scan,
+                    admm_backend="torch",
                 )
                 with contextlib.redirect_stdout(io.StringIO()):
                     _, log = sqp_solve(problem, SqpParameters(**args), guess)
