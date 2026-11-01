@@ -321,7 +321,7 @@ def main(args):
     print(f"Constraint violation (max over batch): {max(log.constraint_violation):.2e}")
 
     if args.save:
-        save_solution(solution, args.save, x_des=x_des)
+        save_solution(solution, args.save, x_des=x_ref_batch)
 
 
 if __name__ == "__main__":
