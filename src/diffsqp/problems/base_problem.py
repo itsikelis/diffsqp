@@ -197,13 +197,40 @@ class Problem(ABC):
         self._padded_bounds = (lb, ub)
         return self._padded_bounds
 
+    def _shared_stage_constraints(self):
+        """The constraints of stages 0..H-2 if all of them use the same
+        objects, else None."""
+        first = self.constraints[0]
+        if not first or any(
+            self.constraints[k] != first for k in range(1, self.horizon - 1)
+        ):
+            return None
+        return first
+
+    def _all_stages(self, method: str, constraints, x, u, dim: int):
+        """`method` (g, gx or gu) of the constraints at stages 0..H-2,
+        concatenated along `dim`; x (B, H-1, n_x), u (B, H-1, n_u)."""
+        rows = []
+        for c in constraints:
+            fn = getattr(c, method)
+            if c.stage_batched:
+                rows.append(fn(x.transpose(0, 1), u.transpose(0, 1)).transpose(0, 1))
+            else:
+                rows.append(torch.stack([fn(x[:, k], u[:, k]) for k in range(x.shape[1])], dim=1))
+        return torch.cat(rows, dim=dim)
+
     def padded_g(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """Stage constraint values stacked over the horizon: (B, H, G)."""
         lb, _ = self.padded_bounds()
         g = torch.zeros(
             (x.shape[0], self.horizon, lb.shape[-1]), dtype=x.dtype, device=x.device
         )
-        for k in range(self.horizon):
+        stages = range(self.horizon)
+        shared = self._shared_stage_constraints()
+        if shared is not None:
+            g[:, :-1, : self.n_g(0)] = self._all_stages("g", shared, x[:, :-1], u, -1)
+            stages = [self.horizon - 1]
+        for k in stages:
             n_g = self.n_g(k)
             if n_g == 0:
                 continue
@@ -345,7 +372,7 @@ class Problem(ABC):
         N = torch.zeros((batch_size, horizon - 1, G, n_u))
         n = torch.zeros((batch_size, horizon, G))
 
-        # Costs and constraints may differ per stage
+        # Costs may differ per stage
         for k in range(horizon - 1):
             x_lin, u_lin = x[:, k], u[:, k]
 
@@ -355,11 +382,21 @@ class Problem(ABC):
             r[:, k] = self.lu(k, x_lin, u_lin)
             S[:, k] = self.lux(k, x_lin, u_lin)
 
-            n_g = self.n_g(k)
-            if n_g > 0:
-                M[:, k, :n_g] = self.gx(k, x_lin, u_lin)
-                N[:, k, :n_g] = self.gu(k, x_lin, u_lin)
-                n[:, k, :n_g] = self.g(k, x_lin, u_lin)
+        # Constraints are usually shared by the stages: evaluate them at once
+        shared = self._shared_stage_constraints()
+        if shared is not None:
+            n_g = self.n_g(0)
+            M[:, :-1, :n_g] = self._all_stages("gx", shared, x[:, :-1], u, -2)
+            N[:, :, :n_g] = self._all_stages("gu", shared, x[:, :-1], u, -2)
+            n[:, :-1, :n_g] = self._all_stages("g", shared, x[:, :-1], u, -1)
+        else:
+            for k in range(horizon - 1):
+                n_g = self.n_g(k)
+                if n_g > 0:
+                    x_lin, u_lin = x[:, k], u[:, k]
+                    M[:, k, :n_g] = self.gx(k, x_lin, u_lin)
+                    N[:, k, :n_g] = self.gu(k, x_lin, u_lin)
+                    n[:, k, :n_g] = self.g(k, x_lin, u_lin)
 
         x_F = x[:, -1]
         Q[:, -1] = self.lxx(-1, x_F)

@@ -6,6 +6,8 @@ from diffsqp.constraints import GenericConstraint
 
 
 class StateBounds(GenericConstraint):
+    stage_batched = True
+
     def __init__(self, n_x, n_u, lb, ub):
         super().__init__(n_g=n_x, n_x=n_x, n_u=n_u, lb=lb, ub=ub)
 
@@ -14,16 +16,8 @@ class StateBounds(GenericConstraint):
         return res
 
     def gx(self, x: torch.Tensor, u: Optional[torch.Tensor] = None):
-        batch_size = x.shape[0]
-        n_g = self.n_g
-        n_x = self.n_x
-        grad = torch.zeros((batch_size, n_g, n_x))
-        grad[:] = torch.eye(n_x)
-        return grad
+        eye = torch.eye(self.n_x, dtype=x.dtype, device=x.device)
+        return eye.expand(*x.shape[:-1], self.n_g, self.n_x)
 
     def gu(self, x: torch.Tensor, u: torch.Tensor):
-        batch_size = x.shape[0]
-        n_g = self.n_g
-        n_u = self.n_u
-        grad = torch.zeros((batch_size, n_g, n_u))
-        return grad
+        return torch.zeros((*x.shape[:-1], self.n_g, self.n_u), dtype=x.dtype, device=x.device)

@@ -23,7 +23,7 @@ import torch
 
 from diffsqp.solvers.admm_qp import UNBOUNDED, constraint_map
 from diffsqp.solvers.lqr import MAX_REG_RETRIES
-from diffsqp.types import AdmmLog, AdmmSolution
+from diffsqp.types import AdmmLog, AdmmSolution, SqpSolution
 
 # Dual regularization of the underactuation KKT blocks, as in lqr.py
 DUAL_REG = 1e-8
@@ -120,7 +120,8 @@ def _warm_start(problem, parameters, lqr_mat, bprob, unconstrained, previous_sol
     if previous_solution is not None:
         if not parameters.admm_reset_ksi:
             sol.ineq_mult.copy_(previous_solution.ksi)
-        if not parameters.admm_reset_rho:
+        # An SQP guess has multipliers but no rho
+        if not parameters.admm_reset_rho and not isinstance(previous_solution, SqpSolution):
             sol.rho_bar.copy_(previous_solution.rho_common)
     return sol
 

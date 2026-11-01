@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 
 from diffsqp.solvers.lqr import lqr_factorize, lqr_solve_factorized
-from diffsqp.types import AdmmSolution, AdmmLog
+from diffsqp.types import AdmmSolution, AdmmLog, SqpSolution
 from diffsqp.utils.math import bmv, bmtv
 
 # Constraint rows with |lb - ub| below this are treated as equalities
@@ -242,7 +242,8 @@ def new_solution(problem, parameters, lqr_mat, unconstrained, previous_solution)
         else:
             ksi = previous_solution.ksi
 
-        if parameters.admm_reset_rho:
+        # An SQP guess has multipliers but no rho
+        if parameters.admm_reset_rho or isinstance(previous_solution, SqpSolution):
             rho, rho_inv, rho_common = reset_rho(problem, parameters, lb, ub)
         else:
             rho = previous_solution.rho

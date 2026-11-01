@@ -47,6 +47,9 @@ class SqpParameters:
         self.admm_reset_ksi: float = args["admm_reset_ksi"]
         # Start the consensus variables z at the projection of the warm start
         self.admm_warm_start_z: bool = args.get("admm_warm_start_z", False)
+        # Start the first QP from the multipliers ksi of the guess, when it has
+        # them (receding horizon). They must match the rows of each stage.
+        self.admm_warm_start_duals: bool = args.get("admm_warm_start_duals", False)
         # Inexact QP safeguard: resume ADMM (up to admm_max_resumes times) for
         # elements whose step does not reduce the linearized constraint
         # violation to admm_resume_kappa * current violation. 0 disables it.
@@ -247,16 +250,24 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
     terminated = torch.zeros((batch_size), dtype=torch.bool)
     reg_incr = torch.zeros((batch_size,))
     current_guess = initial_guess
+    # Only the line search and the inexact QP safeguard read these
+    ls_enabled = parameters.ls_max_iter > 0 or parameters.admm_resume_kappa > 0.0
     # Cost, Dynamics Violation, Constraint Violation, Complementarity Slackness
-    best_cost, best_dyn_inf, best_constr_inf, best_comp_inf = problem.evaluate_guess(
-        current_guess
-    )
+    if ls_enabled:
+        best_cost, best_dyn_inf, best_constr_inf, best_comp_inf = (
+            problem.evaluate_guess(current_guess)
+        )
+    else:
+        not_evaluated = torch.full((batch_size,), torch.nan)
+        best_cost = best_dyn_inf = best_constr_inf = best_comp_inf = not_evaluated
     line_search = make_line_search(
         parameters, batch_size, best_cost, best_dyn_inf, best_constr_inf
     )
 
     sqp_log = SqpSolutionLog()
     admm_solution = None
+    if parameters.admm_warm_start_duals and torch.is_tensor(initial_guess.ksi):
+        admm_solution = initial_guess
     admm_log = None
 
     # Solve for sqp_max_iter steps
@@ -274,8 +285,9 @@ def sqp_solve(problem: Problem, parameters: SqpParameters, initial_guess: SqpSol
             )
 
             # Inexact QP safeguard
-            theta = torch.maximum(best_dyn_inf, best_constr_inf)
-            theta_lin = _linearized_violation(mat, admm_solution)
+            if ls_enabled:
+                theta = torch.maximum(best_dyn_inf, best_constr_inf)
+                theta_lin = _linearized_violation(mat, admm_solution)
             if parameters.admm_resume_kappa > 0.0:
                 for _ in range(parameters.admm_max_resumes):
                     inaccurate = (
