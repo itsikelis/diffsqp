@@ -10,6 +10,7 @@ normalized one) and non-zero velocities, accelerations and forces.
 
 import importlib.util
 import os
+from copy import copy as _copy
 
 import torch
 
@@ -95,12 +96,64 @@ def _check_example(module_name):
     _check_constraint("FrictionCone", cone, x, u)
 
 
+def _check_stage_batching(module_name):
+    """Problem.linearize and padded_g give the same matrices whether the shared
+    constraints run once on (S, B, n) inputs, stage by stage, or the old way."""
+    ex = _load_example(module_name)
+    model = ex.gdyn.load_urdf(ex.URDF_PATH)
+    default_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(DTYPE)
+    try:
+        torch.manual_seed(0)
+        setup = ex.build_problem(model, batch_size=3, horizon=6)
+        problem, guess = setup.problem, setup.initial_guess
+        guess.x = guess.x + 1e-2 * torch.randn_like(guess.x)
+        guess.u = guess.u + 1e-1 * torch.randn_like(guess.u)
+
+        def matrices():
+            mat = problem.linearize(guess)
+            return mat.M, mat.N, mat.n, problem.padded_g(guess.x, guess.u)
+
+        assert problem._shared_stage_constraints() is problem.constraints[0]
+        batched = matrices()
+        for c in problem.constraints[0]:
+            c.stage_batched = False
+        stacked = matrices()
+
+        # Stages that do not share their constraints take the per-stage loop
+        problem.constraints[2] = [*problem.constraints[2]]
+        problem.constraints[2][-1] = _copy(problem.constraints[2][-1])
+        assert problem._shared_stage_constraints() is None
+        looped = matrices()
+    finally:
+        torch.set_default_dtype(default_dtype)
+
+    for name, a, b, c in zip("M N n g".split(), batched, stacked, looped):
+        torch.testing.assert_close(a, b, rtol=1e-13, atol=1e-13, msg=f"{name}: batched vs stacked")
+        torch.testing.assert_close(a, c, rtol=1e-13, atol=1e-13, msg=f"{name}: batched vs loop")
+
+
 def test_go2_riccati_derivatives():
     _check_example("go2_inverse_riccati")
 
 
 def test_go2_admm_derivatives():
     _check_example("go2_inverse_admm")
+
+
+def test_go2_riccati_stage_batching():
+    _check_stage_batching("go2_inverse_riccati")
+
+
+def test_go2_admm_stage_batching():
+    _check_stage_batching("go2_inverse_admm")
+
+
+def test_mpc_shift_keeps_terminal_rows():
+    mpc = _load_example("go2_mpc")
+    ksi = torch.arange(5.0).reshape(1, 5, 1)
+    shifted = mpc.shift_stages(ksi, 2)
+    assert shifted.flatten().tolist() == [2.0, 3.0, 3.0, 3.0, 4.0]
 
 
 if __name__ == "__main__":

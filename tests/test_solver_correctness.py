@@ -328,6 +328,56 @@ def test_sqp_matches_baseline():
         torch.set_default_dtype(default_dtype)
 
 
+def test_no_line_search_skips_evaluate_guess():
+    """Nothing reads the merit values without a line search or a safeguard, so
+    they are not computed; they do not affect the step."""
+    for ls in ["merit_adaptive", "filter_ipopt"]:
+        problem, guess, args = toy_problems.PROBLEMS["cartpole_inverse"](batch_size=3, seed=1)
+        args.update(sqp_max_iter=1, ls_max_iter=0, ls_function=ls, verbose=False)
+        calls = []
+        evaluate_guess = problem.evaluate_guess
+        problem.evaluate_guess = lambda s: (calls.append(1), evaluate_guess(s))[1]
+
+        skipped, log = sqp_solve(problem, SqpParameters(**args), guess)
+        assert not calls
+        assert torch.tensor(log.total_cost).isnan().all()
+
+        # An infinite kappa evaluates the guess but never resumes ADMM
+        args["admm_resume_kappa"] = float("inf")
+        evaluated, log = sqp_solve(problem, SqpParameters(**args), guess)
+        assert len(calls) == 1
+        assert torch.tensor(log.total_cost).isfinite().all()
+        assert torch.equal(skipped.x, evaluated.x) and torch.equal(skipped.u, evaluated.u)
+
+
+def test_admm_warm_start_duals():
+    """The multipliers of a converged guess shorten the next QP; the default
+    and a guess without multipliers keep the cold start."""
+    for backend in ["bsqp", "torch"]:
+        problem, guess, args = toy_problems.PROBLEMS["cartpole_forward"](batch_size=3, seed=1)
+        args.update(sqp_max_iter=40, admm_backend=backend, admm_max_iter=500, verbose=False)
+        solution, _ = sqp_solve(problem, SqpParameters(**args), guess)
+
+        # The toy solutions keep their bounds inactive (ksi = 0): tighten the controls
+        control_bounds = problem.constraints[0][1]
+        limit = 0.95 * solution.u.abs().amax(dim=(0, 1))
+        control_bounds.lb, control_bounds.ub = -limit, limit
+        solution, _ = sqp_solve(problem, SqpParameters(**args), guess)
+        assert solution.ksi.abs().max() > 1e-3
+
+        def first_qp_iterations(start, **overrides):
+            params = SqpParameters(**{**args, "sqp_max_iter": 1, **overrides})
+            return sqp_solve(problem, params, start)[1].admm_iter_hist[0]
+
+        cold = first_qp_iterations(solution)
+        warm = first_qp_iterations(solution, admm_warm_start_duals=True)
+        assert warm < cold, (backend, warm, cold)
+        # Not a tensor: the first guess of a problem
+        assert first_qp_iterations(guess, admm_warm_start_duals=True) == first_qp_iterations(guess)
+        # The guess has no rho to keep
+        first_qp_iterations(solution, admm_warm_start_duals=True, admm_reset_rho=False)
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_")]
     for name, fn in tests:

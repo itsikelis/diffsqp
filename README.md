@@ -47,6 +47,7 @@ The `examples/` folder contains small, self-contained scripts. Each one solves a
 | `examples/franka_constrained.py` | Franka FP3 end-effector reaching with joint position and velocity limits, using user-defined dynamics and cost classes |
 | `examples/go2_inverse_riccati.py` | Go2 standing base-pose shift with inverse dynamics (u = accelerations and foot forces), sticking contacts and friction cones; the 6 floating-base rows are an underactuation constraint in the Riccati, the joint torque limits are in ADMM |
 | `examples/go2_inverse_admm.py` | Same Go2 problem with all inverse-dynamics rows in ADMM (base rows as equality rows) |
+| `examples/go2_mpc.py` | MPC-style simulation of the Go2 problem: one full solve, then one warm-started SQP iteration per MPC step, with the joint torques applied to a robot simulated with gdyn's forward dynamics (`aba`) and sticking feet. Also takes `--formulation {riccati,admm}`, `--dt_mpc`, `--n_mpc`, `--admm_iters` and writes `<path>_mpc.pt` |
 
 All examples take the same arguments:
 
@@ -99,6 +100,9 @@ uv run visuals/visualize_trajectory.py --urdf fp3.urdf --show_target --spacing_x
 
 # Go2 (gdyn state layout: xyzw quaternion; feet are 22 mm spheres centred at z = 0), in real time
 uv run visuals/visualize_trajectory.py --urdf go2.urdf --floating_base --quat_order xyzw --show_target --floor_z -0.022 --dt 0.02 --file out/go2_riccati.pt --batch_size 8
+
+# Go2 MPC simulation (examples/go2_mpc.py --save out/go2), one frame per 10 ms MPC step
+uv run visuals/visualize_trajectory.py --urdf go2.urdf --floating_base --quat_order xyzw --show_target --floor_z -0.022 --dt 0.01 --file out/go2_mpc.pt --batch_size 4
 ```
 
 Open http://localhost:8080 and press **Play Trajectory**. To download the playback as a GIF, add `--record` (use `--record_skip N` to keep every N-th frame). **Take Snapshot** saves a PNG. Run with `--help` to see all options (grid layout, camera, playback speed).

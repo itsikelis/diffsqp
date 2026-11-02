@@ -30,6 +30,7 @@ import math
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import torch
 import gdyn
@@ -46,6 +47,9 @@ URDF_PATH = Path(__file__).resolve().parent.parent / "resources" / "robots" / "g
 FEET = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
 # Finite "no bound" (like PAD_BOUND), so complementarity products stay finite
 UNBOUNDED = 1e20
+DT = 0.02
+# The base reference spans 1 s; a shorter problem horizon is a window over it
+REFERENCE_NODES = 50
 
 
 @dataclass
@@ -248,6 +252,8 @@ class InverseDynamicsBounds(GenericConstraint):
     tau_lb <= tau[6:] <= tau_ub.
     """
 
+    stage_batched = True
+
     def __init__(self, model, tau_lb: torch.Tensor, tau_ub: torch.Tensor):
         zero = torch.zeros(6)
         super().__init__(
@@ -275,6 +281,8 @@ class FrictionCone(GenericConstraint):
     5 rows per foot: f_z >= 0 and +-f_x, +-f_y + (mu / sqrt(2)) f_z >= 0
     (the pyramid inscribed in the cone). Linear in u.
     """
+
+    stage_batched = True
 
     def __init__(self, n_x: int, n_u: int, mu: float):
         n_g = 5 * len(FEET)
@@ -304,6 +312,8 @@ class FootContact(GenericConstraint):
     Sticking contacts: the feet stay at p0 (12 rows) with zero velocity
     J_c v (12 rows). Equalities (lb = ub = 0); p0 (B, 4, 3) per problem.
     """
+
+    stage_batched = True
 
     def __init__(self, model, p0: torch.Tensor):
         n_g = 6 * len(FEET)
@@ -377,15 +387,10 @@ def pose_references(x_init: torch.Tensor, offset: torch.Tensor, horizon: int) ->
     return x_ref
 
 
-def main(args):
-    # The default-device dispatch mode adds a large per-op overhead on CPU
-    if args.device != "cpu":
-        torch.set_default_device(args.device)
-    batch_size = args.batch_size
-
-    model = gdyn.load_urdf(URDF_PATH)
-    assert model.nq == 19 and model.nv == 18, "expected the go2 free-flyer model"
-
+def build_problem(model, batch_size: int, horizon: int = REFERENCE_NODES):
+    """The batched problem over the first `horizon` nodes of the reference,
+    solver parameters and initial guess, on the default device (also used by
+    examples/go2_mpc.py)."""
     sqp_parameters = SqpParameters(
         **{
             ## ADMM ##
@@ -443,8 +448,8 @@ def main(args):
             "inverse_dynamics": True,
             "n_h": 0,  # The unactuated base rows are ADMM equality rows
             "batch_size": batch_size,
-            "dt": 0.02,
-            "tf": 1.0,
+            "dt": DT,
+            "tf": (horizon + 0.5) * DT,  # int(tf / dt) = horizon
             "x_init": x_init,
             "x_des": x_init,
             # The contacts fix the initial state: no perturbation
@@ -472,8 +477,7 @@ def main(args):
     # Reference: move the base by a random pose offset (x, y, z, roll, pitch, yaw)
     offset_max = torch.tensor([0.03, 0.03, 0.04, 0.15, 0.15, 0.15])
     offset = (2.0 * torch.rand(batch_size, 6) - 1.0) * offset_max
-    x_ref = pose_references(problem_parameters.x_init, offset, problem.horizon)
-    x_des = x_ref[:, -1]
+    x_ref = pose_references(problem_parameters.x_init, offset, REFERENCE_NODES)
 
     # Static foot forces at the stance (minimum norm, base rows of the inverse dynamics)
     q0 = q_stance.unsqueeze(0)
@@ -489,7 +493,7 @@ def main(args):
         LqrCost(Q=Q, R=R, x_des=x_ref[:, k], u_des=u_static)
         for k in range(problem.horizon - 1)
     ]
-    terminal_cost = LqrCost(Q=Qf, x_des=x_des)
+    terminal_cost = LqrCost(Q=Qf, x_des=x_ref[:, problem.horizon - 1])
 
     state_bounds = StateBounds(
         problem.n_x, problem.n_u, problem_parameters.x_lb, problem_parameters.x_ub
@@ -522,10 +526,33 @@ def main(args):
         ksi=[None] * problem.horizon,
     )
 
-    print(f"Solving {batch_size} Go2 standing problems (base rows in ADMM)...")
-    solution, log = sqp_solve(problem, sqp_parameters, initial_guess)
+    return SimpleNamespace(
+        problem=problem,
+        sqp_parameters=sqp_parameters,
+        initial_guess=initial_guess,
+        stage_costs=stage_costs,
+        terminal_cost=terminal_cost,
+        x_ref=x_ref,
+        p0=p0,
+        tau_max=tau_max,
+        friction_cone=friction_cone,
+    )
+
+
+def main(args):
+    # The default-device dispatch mode adds a large per-op overhead on CPU
+    if args.device != "cpu":
+        torch.set_default_device(args.device)
+
+    model = gdyn.load_urdf(URDF_PATH)
+    assert model.nq == 19 and model.nv == 18, "expected the go2 free-flyer model"
+    setup = build_problem(model, args.batch_size)
+    x_des = setup.x_ref[:, -1]
+
+    print(f"Solving {args.batch_size} Go2 standing problems (base rows in ADMM)...")
+    solution, log = sqp_solve(setup.problem, setup.sqp_parameters, setup.initial_guess)
     print(log)
-    report(model, solution, log, x_des, p0, tau_max, friction_cone)
+    report(model, solution, log, x_des, setup.p0, setup.tau_max, setup.friction_cone)
 
     if args.save:
         save_solution(solution, args.save, x_des=x_des)

@@ -37,7 +37,7 @@ dependencies = [
 [[package]]
 name = "bsqp"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/itsikelis/bsqp.git#e78c52bf09d4fdf136958911e8cfaed044799ec1" }
+source = { git = "ssh://git@github.com/itsikelis/bsqp.git#4b8b2805a3b37c67f57d93581ed5f975b8fe463e" }
 dependencies = [
     { name = "torch" },
 ]
@@ -628,7 +628,7 @@ wheels = [
 [[package]]
 name = "gdyn"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/itsikelis/gdyn.git#fd7ac8ea6874cd71a06696414a91cd158cad7544" }
+source = { git = "ssh://git@github.com/itsikelis/gdyn.git#898a28500acdf14fb3eda0e7aad0aa5703d1deb6" }
 dependencies = [
     { name = "torch" },
 ]
